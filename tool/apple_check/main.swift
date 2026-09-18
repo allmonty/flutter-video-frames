@@ -1,6 +1,7 @@
 // Runs FrameReader/FrameWriter against real AVFoundation on macOS (the same
 // framework the iOS plugin uses), without a device or simulator.
 // Run: tool/apple_check.sh
+import AVFoundation
 import Foundation
 
 func frame(_ w: Int, _ h: Int, _ i: Int) -> Data {
@@ -66,6 +67,35 @@ if CommandLine.arguments.count > 1 {
   let aw = try FrameWriter(path: audioPath, width: 64, height: 64, frameRate: 10, bitRate: nil, audioSourcePath: CommandLine.arguments[1])
   for i in 0..<20 { try aw.addFrame(rgba: Data(repeating: UInt8(i * 10), count: 64 * 64 * 4), ptsUs: Int64(i) * 100_000) }
   try aw.finish()
-  check(try FrameReader(path: audioPath, maxDimension: nil).hasAudio, "audio track copied")
+  check(aw.audioIncluded, "writer reports AAC audio included")
+  let withAudio = try FrameReader(path: audioPath, maxDimension: nil)
+  check(withAudio.hasAudio, "audio track copied")
+  check(withAudio.audioCompatible, "copied AAC audio reported compatible")
+
+  // Compatibility of the source formats themselves.
+  let aac = AVURLAsset(url: URL(fileURLWithPath: CommandLine.arguments[1])).tracks(withMediaType: .audio).first!
+  check(AudioSupport.canCopyIntoMp4(aac), "AAC can be copied into an MP4")
+  if CommandLine.arguments.count > 2 {
+    let pcmPath = CommandLine.arguments[2]
+    let pcm = AVURLAsset(url: URL(fileURLWithPath: pcmPath)).tracks(withMediaType: .audio).first!
+    // AVFoundation accepts PCM passthrough into an MP4 (Apple players handle
+    // it), so on iOS it counts as compatible and is written.
+    check(AudioSupport.canCopyIntoMp4(pcm), "AVFoundation accepts PCM (AIFF) passthrough")
+    let pcmOut = NSTemporaryDirectory() + "vf_pcm.mp4"
+    let pw = try FrameWriter(path: pcmOut, width: 64, height: 64, frameRate: 10, bitRate: nil, audioSourcePath: pcmPath)
+    check(pw.audioIncluded, "writer includes the PCM audio")
+    for i in 0..<5 { try pw.addFrame(rgba: Data(repeating: 128, count: 64 * 64 * 4), ptsUs: Int64(i) * 100_000) }
+    try pw.finish()
+    check(try FrameReader(path: pcmOut, maxDimension: nil).hasAudio, "PCM audio written")
+
+    // A source without audio: nothing to copy, and the export still works.
+    let silentPath = NSTemporaryDirectory() + "vf_silent.mp4"
+    let sw = try FrameWriter(path: silentPath, width: 64, height: 64, frameRate: 10, bitRate: nil, audioSourcePath: path)
+    check(!sw.audioIncluded, "a source without audio adds no track")
+    for i in 0..<5 { try sw.addFrame(rgba: Data(repeating: 128, count: 64 * 64 * 4), ptsUs: Int64(i) * 100_000) }
+    try sw.finish()
+    let silent = try FrameReader(path: silentPath, maxDimension: nil)
+    check(!silent.hasAudio && !silent.audioCompatible, "video saved without sound")
+  }
 }
 print("ALL PASSED")

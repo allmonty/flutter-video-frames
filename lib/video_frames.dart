@@ -21,6 +21,7 @@ class VideoInfo {
     required this.frameRate,
     required this.rotationDegrees,
     required this.hasAudio,
+    this.audioCompatible = false,
   });
 
   /// Size of the delivered frames (after rotation and any scaling).
@@ -32,6 +33,10 @@ class VideoInfo {
   /// The file's rotation metadata; frames are already upright.
   final int rotationDegrees;
   final bool hasAudio;
+
+  /// The audio can be copied into an MP4 unchanged. When [hasAudio] is true
+  /// but this is false, [VideoWriter] drops the sound instead of failing.
+  final bool audioCompatible;
 
   /// Approximate number of frames.
   int get estimatedFrameCount =>
@@ -84,6 +89,7 @@ class VideoReader {
         frameRate: m.frameRate,
         rotationDegrees: m.rotationDegrees,
         hasAudio: m.hasAudio,
+        audioCompatible: m.audioCompatible,
       ),
     );
   }
@@ -122,7 +128,14 @@ class VideoReader {
 
 /// Encodes RGBA frames into an H.264 MP4.
 class VideoWriter {
-  VideoWriter._(this._id, this.width, this.height, this._requestedWidth, this._requestedHeight);
+  VideoWriter._(
+    this._id,
+    this.width,
+    this.height,
+    this._requestedWidth,
+    this._requestedHeight,
+    this.includesAudio,
+  );
 
   final int _id;
 
@@ -132,6 +145,11 @@ class VideoWriter {
   final int height;
   final int _requestedWidth;
   final int _requestedHeight;
+
+  /// Whether the audio source's track is being copied. False when no audio
+  /// source was given, it has no audio, or its format can't go into an MP4
+  /// unchanged (the video is still written, silent).
+  final bool includesAudio;
   bool _done = false;
 
   /// Create `path` (overwritten if it exists). With `audioSourcePath`, that
@@ -147,8 +165,16 @@ class VideoWriter {
     final w = width & ~1, h = height & ~1;
     if (w < 2 || h < 2) throw ArgumentError('video must be at least 2x2, got ${width}x$height');
     final id = VideoFrames._id();
-    await VideoFrames.api.openWriter(id, path, w, h, frameRate, bitRate, audioSourcePath);
-    return VideoWriter._(id, w, h, width, height);
+    final audio = await VideoFrames.api.openWriter(
+      id,
+      path,
+      w,
+      h,
+      frameRate,
+      bitRate,
+      audioSourcePath,
+    );
+    return VideoWriter._(id, w, h, width, height, audio);
   }
 
   /// Append a frame (RGBA, `width * height * 4` bytes, or the requested

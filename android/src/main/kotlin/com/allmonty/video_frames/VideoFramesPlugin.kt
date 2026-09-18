@@ -34,6 +34,7 @@ class VideoFramesPlugin : FlutterPlugin, VideoFramesHostApi {
             frameRate = reader.frameRate,
             rotationDegrees = reader.rotation.toLong(),
             hasAudio = reader.hasAudio,
+            audioCompatible = reader.audioCompatible,
         )
     }
 
@@ -61,9 +62,10 @@ class VideoFramesPlugin : FlutterPlugin, VideoFramesHostApi {
         frameRate: Double,
         bitRate: Long?,
         audioSourcePath: String?,
-    ) {
+    ): Boolean {
         val writer = FrameWriter(path, width.toInt(), height.toInt(), frameRate, bitRate?.toInt(), audioSourcePath)
         synchronized(this) { writers[writerId] = writer }
+        return writer.audioIncluded
     }
 
     override fun addFrame(writerId: Long, rgba: ByteArray, ptsUs: Long) {

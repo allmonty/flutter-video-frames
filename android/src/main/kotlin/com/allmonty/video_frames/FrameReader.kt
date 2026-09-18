@@ -20,6 +20,9 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
     val durationUs: Long
     val frameRate: Double
     val hasAudio: Boolean
+
+    /** The audio track can be copied into an MP4 unchanged. */
+    val audioCompatible: Boolean
     val width: Int
     val height: Int
 
@@ -34,7 +37,8 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
         } else {
             30.0
         }
-        hasAudio = sequential.hasAudio
+        hasAudio = sequential.audioFormat != null
+        audioCompatible = sequential.audioFormat?.let { AudioSupport.canMuxIntoMp4(it) } ?: false
         val (w, h) = ColorConversion.outputSize(srcWidth, srcHeight, rotation, maxDimension)
         width = w
         height = h
@@ -65,7 +69,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
     private inner class Decoder {
         val extractor = MediaExtractor()
         val format: MediaFormat
-        val hasAudio: Boolean
+        val audioFormat: MediaFormat?
         private val codec: MediaCodec
         private val info = MediaCodec.BufferInfo()
         private var inputDone = false
@@ -74,17 +78,18 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
         init {
             extractor.setDataSource(path)
             var track = -1
-            var audio = false
+            var audio: MediaFormat? = null
             for (i in 0 until extractor.trackCount) {
-                val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
+                val trackFormat = extractor.getTrackFormat(i)
+                val mime = trackFormat.getString(MediaFormat.KEY_MIME) ?: continue
                 if (track < 0 && mime.startsWith("video/")) track = i
-                if (mime.startsWith("audio/")) audio = true
+                if (audio == null && mime.startsWith("audio/")) audio = trackFormat
             }
             if (track < 0) {
                 extractor.release()
                 throw IllegalArgumentException("no video track in $path")
             }
-            hasAudio = audio
+            audioFormat = audio
             extractor.selectTrack(track)
             format = extractor.getTrackFormat(track)
             val mime = format.getString(MediaFormat.KEY_MIME)!!

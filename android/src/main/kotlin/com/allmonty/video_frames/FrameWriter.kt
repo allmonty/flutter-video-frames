@@ -27,8 +27,12 @@ class FrameWriter(
     private var videoTrack = -1
     private var muxerStarted = false
 
-    private val audioExtractor: MediaExtractor?
+    private var audioExtractor: MediaExtractor? = null
     private var audioTrack = -1
+
+    /** Whether the audio source's track will be copied (see [AudioSupport]). */
+    val audioIncluded: Boolean
+        get() = audioExtractor != null
 
     init {
         require(width % 2 == 0 && height % 2 == 0) { "size must be even, got ${width}x$height" }
@@ -41,25 +45,32 @@ class FrameWriter(
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         codec.start()
 
-        audioExtractor = audioSourcePath?.let { source ->
-            val extractor = MediaExtractor()
+        if (audioSourcePath != null) openAudio(audioSourcePath)
+    }
+
+    /**
+     * Add the source's audio track to the muxer (its samples are copied in
+     * finish(), since the muxer only starts once the video format is known).
+     * A format the MP4 muxer rejects is dropped: the video is still written.
+     */
+    private fun openAudio(source: String) {
+        val extractor = MediaExtractor()
+        try {
             extractor.setDataSource(source)
-            var track = -1
             for (i in 0 until extractor.trackCount) {
-                val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
-                if (mime.startsWith("audio/")) { track = i; break }
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (!mime.startsWith("audio/")) continue
+                audioTrack = muxer.addTrack(format)
+                extractor.selectTrack(i)
+                audioExtractor = extractor
+                return
             }
-            if (track < 0) {
-                extractor.release()
-                null
-            } else {
-                extractor.selectTrack(track)
-                // The muxer starts once the video format is known, so the audio
-                // track is added now and its samples copied in finish().
-                audioTrack = muxer.addTrack(extractor.getTrackFormat(track))
-                extractor
-            }
+        } catch (e: Exception) {
+            // Unsupported audio format: continue without sound.
         }
+        audioTrack = -1
+        extractor.release()
     }
 
     fun addFrame(rgba: ByteArray, ptsUs: Long) {

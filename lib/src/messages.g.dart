@@ -103,6 +103,7 @@ class VideoInfoMessage {
     required this.frameRate,
     required this.rotationDegrees,
     required this.hasAudio,
+    required this.audioCompatible,
   });
 
   /// Frame size as delivered (after rotation and scaling).
@@ -119,8 +120,20 @@ class VideoInfoMessage {
 
   bool hasAudio;
 
+  /// The audio track can be copied into an MP4 unchanged (false when there
+  /// is no audio, or its format doesn't fit the MP4 container).
+  bool audioCompatible;
+
   List<Object?> _toList() {
-    return <Object?>[width, height, durationUs, frameRate, rotationDegrees, hasAudio];
+    return <Object?>[
+      width,
+      height,
+      durationUs,
+      frameRate,
+      rotationDegrees,
+      hasAudio,
+      audioCompatible,
+    ];
   }
 
   Object encode() {
@@ -136,6 +149,7 @@ class VideoInfoMessage {
       frameRate: result[3]! as double,
       rotationDegrees: result[4]! as int,
       hasAudio: result[5]! as bool,
+      audioCompatible: result[6]! as bool,
     );
   }
 
@@ -153,7 +167,8 @@ class VideoInfoMessage {
         _deepEquals(durationUs, other.durationUs) &&
         _deepEquals(frameRate, other.frameRate) &&
         _deepEquals(rotationDegrees, other.rotationDegrees) &&
-        _deepEquals(hasAudio, other.hasAudio);
+        _deepEquals(hasAudio, other.hasAudio) &&
+        _deepEquals(audioCompatible, other.audioCompatible);
   }
 
   @override
@@ -162,7 +177,7 @@ class VideoInfoMessage {
 
   @override
   String toString() {
-    return 'VideoInfoMessage(width: $width, height: $height, durationUs: $durationUs, frameRate: $frameRate, rotationDegrees: $rotationDegrees, hasAudio: $hasAudio)';
+    return 'VideoInfoMessage(width: $width, height: $height, durationUs: $durationUs, frameRate: $frameRate, rotationDegrees: $rotationDegrees, hasAudio: $hasAudio, audioCompatible: $audioCompatible)';
   }
 }
 
@@ -356,7 +371,9 @@ class VideoFramesHostApi {
     _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
   }
 
-  Future<void> openWriter(
+  /// Returns whether the audio of `audioSourcePath` will be copied; audio
+  /// that can't go into an MP4 unchanged is dropped instead of failing.
+  Future<bool> openWriter(
     int writerId,
     String path,
     int width,
@@ -383,7 +400,12 @@ class VideoFramesHostApi {
     ]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
-    _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
+    return pigeonVar_replyValue! as bool;
   }
 
   Future<void> addFrame(int writerId, Uint8List rgba, int ptsUs) async {

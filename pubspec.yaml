@@ -1,7 +1,7 @@
 name: video_frames
 description: "Decode video frames to RGBA and encode RGBA frames to H.264 MP4 (audio copied through) on Android and iOS, with no FFmpeg."
 publish_to: none
-version: 0.1.0
+version: 0.2.0
 homepage:
 
 environment:

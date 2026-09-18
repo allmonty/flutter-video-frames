@@ -24,6 +24,7 @@ class FakeHostApi extends VideoFramesHostApi {
       frameRate: 25,
       rotationDegrees: 90,
       hasAudio: true,
+      audioCompatible: false,
     );
   }
 
@@ -41,7 +42,7 @@ class FakeHostApi extends VideoFramesHostApi {
   Future<void> closeReader(int readerId) async => calls.add('close $readerId');
 
   @override
-  Future<void> openWriter(
+  Future<bool> openWriter(
     int writerId,
     String path,
     int width,
@@ -53,6 +54,8 @@ class FakeHostApi extends VideoFramesHostApi {
     calls.add('writer $path ${width}x$height $frameRate $bitRate $audioSourcePath');
     writerSizes[writerId] = (width, height);
     written[writerId] = [];
+    // Pretend '.pcm' sources hold audio that can't go into an MP4.
+    return audioSourcePath != null && !audioSourcePath.endsWith('.pcm');
   }
 
   @override
@@ -83,6 +86,7 @@ void main() {
       expect(info.frameRate, 25);
       expect(info.rotationDegrees, 90);
       expect(info.hasAudio, isTrue);
+      expect(info.audioCompatible, isFalse);
       expect(info.estimatedFrameCount, 3);
     });
 
@@ -157,8 +161,8 @@ void main() {
       expect(() => writer.addFrame(Uint8List(10), Duration.zero), throwsArgumentError);
     });
 
-    test('passes bit rate and audio source', () async {
-      await VideoWriter.create(
+    test('passes bit rate and audio source, and reports whether audio is kept', () async {
+      final kept = await VideoWriter.create(
         '/o.mp4',
         width: 8,
         height: 8,
@@ -167,6 +171,17 @@ void main() {
         audioSourcePath: '/in.mov',
       );
       expect(api.calls.single, 'writer /o.mp4 8x8 24.0 500000 /in.mov');
+      expect(kept.includesAudio, isTrue);
+      final dropped = await VideoWriter.create(
+        '/o.mp4',
+        width: 8,
+        height: 8,
+        frameRate: 24,
+        audioSourcePath: '/in.pcm',
+      );
+      expect(dropped.includesAudio, isFalse);
+      final none = await VideoWriter.create('/o.mp4', width: 8, height: 8, frameRate: 24);
+      expect(none.includesAudio, isFalse);
     });
 
     test('rejects videos smaller than 2x2', () {

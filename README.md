@@ -39,6 +39,27 @@ await reader.close();
 final still = await reader.frameAt(const Duration(seconds: 3));
 ```
 
+## Audio
+
+`audioSourcePath` copies the source's audio track into the MP4 unchanged;
+nothing is re-encoded. Not every audio format fits an MP4:
+
+- `VideoInfo.audioCompatible` says whether a video's audio can be copied.
+  Check it after opening, so you can tell the user before exporting.
+- `VideoWriter.includesAudio` says whether the writer is actually copying
+  the audio.
+- When the audio doesn't fit, the writer drops it and still writes the
+  video, silent, instead of failing.
+
+What counts as compatible depends on the platform:
+
+- **Android:** `MediaMuxer` is asked directly, with a trial `addTrack` on a
+  throwaway file. AAC always works; the accepted codecs vary by Android
+  version.
+- **iOS:** `AVAssetWriter.canAdd` is asked. AVFoundation is permissive and
+  accepts AAC and even PCM. PCM-in-MP4 plays on Apple devices but may not
+  play everywhere else.
+
 H.264 needs even dimensions. `VideoWriter` rounds the size down to even
 numbers (`writer.width` and `writer.height`) and crops frames given at the
 requested size.

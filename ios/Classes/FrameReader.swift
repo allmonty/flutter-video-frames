@@ -17,6 +17,35 @@ enum VideoFramesError: Error, CustomStringConvertible {
   }
 }
 
+/// Whether an audio track can be copied into an MP4 unchanged: a
+/// passthrough writer input for it must be accepted by an MP4 writer (AAC
+/// is; e.g. the PCM audio of many .mov files isn't).
+enum AudioSupport {
+  static func canCopyIntoMp4(_ track: AVAssetTrack) -> Bool {
+    passthroughInput(for: track, into: nil) != nil
+  }
+
+  /// A passthrough input for `track`, added to `writer` when given; nil if an
+  /// MP4 writer won't accept it.
+  static func passthroughInput(for track: AVAssetTrack, into writer: AVAssetWriter?) -> AVAssetWriterInput? {
+    let hint = track.formatDescriptions.first.map { $0 as! CMFormatDescription }
+    let input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: hint)
+    input.expectsMediaDataInRealTime = false
+    let target: AVAssetWriter
+    if let writer = writer {
+      target = writer
+    } else {
+      let probe = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("video_frames_probe_\(UUID().uuidString).mp4")
+      guard let probeWriter = try? AVAssetWriter(outputURL: probe, fileType: .mp4) else { return nil }
+      target = probeWriter
+    }
+    guard target.canAdd(input) else { return nil }
+    if writer != nil { target.add(input) }
+    return input
+  }
+}
+
 /// Decodes a file's video track to upright RGBA frames (rotation metadata
 /// applied), optionally scaled down. Sequential frames come from an
 /// `AVAssetReader`; random access (`frame(at:)`) uses `AVAssetImageGenerator`.
@@ -27,6 +56,9 @@ final class FrameReader {
   let durationUs: Int64
   let frameRate: Double
   let hasAudio: Bool
+
+  /// The audio track can be copied into an MP4 unchanged.
+  let audioCompatible: Bool
 
   private let asset: AVURLAsset
   private let reader: AVAssetReader
@@ -55,7 +87,9 @@ final class FrameReader {
       srcWidth: srcWidth, srcHeight: srcHeight, rotation: rotation, maxDimension: maxDimension)
     durationUs = Int64(CMTimeGetSeconds(asset.duration) * 1_000_000)
     frameRate = track.nominalFrameRate > 0 ? Double(track.nominalFrameRate) : 30
-    hasAudio = !asset.tracks(withMediaType: .audio).isEmpty
+    let audioTrack = asset.tracks(withMediaType: .audio).first
+    hasAudio = audioTrack != nil
+    audioCompatible = audioTrack.map(AudioSupport.canCopyIntoMp4) ?? false
 
     reader = try AVAssetReader(asset: asset)
     output = AVAssetReaderTrackOutput(

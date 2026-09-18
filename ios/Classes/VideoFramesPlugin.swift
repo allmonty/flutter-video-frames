@@ -49,7 +49,8 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoFramesHostApi {
       lock.unlock()
       return VideoInfoMessage(
         width: Int64(reader.width), height: Int64(reader.height), durationUs: reader.durationUs,
-        frameRate: reader.frameRate, rotationDegrees: Int64(reader.rotation), hasAudio: reader.hasAudio)
+        frameRate: reader.frameRate, rotationDegrees: Int64(reader.rotation), hasAudio: reader.hasAudio,
+        audioCompatible: reader.audioCompatible)
     }
   }
 
@@ -83,7 +84,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoFramesHostApi {
   func openWriter(
     writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?,
     audioSourcePath: String?
-  ) throws {
+  ) throws -> Bool {
     try bridged {
       let writer = try FrameWriter(
         path: path, width: Int(width), height: Int(height), frameRate: frameRate,
@@ -91,6 +92,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoFramesHostApi {
       lock.lock()
       writers[writerId] = writer
       lock.unlock()
+      return writer.audioIncluded
     }
   }
 

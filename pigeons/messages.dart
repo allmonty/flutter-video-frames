@@ -19,6 +19,7 @@ class VideoInfoMessage {
     required this.frameRate,
     required this.rotationDegrees,
     required this.hasAudio,
+    required this.audioCompatible,
   });
 
   /// Frame size as delivered (after rotation and scaling).
@@ -30,6 +31,10 @@ class VideoInfoMessage {
   /// Rotation from the file's metadata, already applied to the frames.
   int rotationDegrees;
   bool hasAudio;
+
+  /// The audio track can be copied into an MP4 unchanged (false when there
+  /// is no audio, or its format doesn't fit the MP4 container).
+  bool audioCompatible;
 }
 
 class VideoFrameMessage {
@@ -68,8 +73,10 @@ abstract class VideoFramesHostApi {
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
   void closeReader(int readerId);
 
+  /// Returns whether the audio of `audioSourcePath` will be copied; audio
+  /// that can't go into an MP4 unchanged is dropped instead of failing.
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
-  void openWriter(
+  bool openWriter(
     int writerId,
     String path,
     int width,

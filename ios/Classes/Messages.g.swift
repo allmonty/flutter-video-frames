@@ -194,6 +194,9 @@ struct VideoInfoMessage: Hashable, CustomStringConvertible {
   /// Rotation from the file's metadata, already applied to the frames.
   var rotationDegrees: Int64
   var hasAudio: Bool
+  /// The audio track can be copied into an MP4 unchanged (false when there
+  /// is no audio, or its format doesn't fit the MP4 container).
+  var audioCompatible: Bool
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -204,6 +207,7 @@ struct VideoInfoMessage: Hashable, CustomStringConvertible {
     let frameRate = pigeonVar_list[3] as! Double
     let rotationDegrees = pigeonVar_list[4] as! Int64
     let hasAudio = pigeonVar_list[5] as! Bool
+    let audioCompatible = pigeonVar_list[6] as! Bool
 
     return VideoInfoMessage(
       width: width,
@@ -211,7 +215,8 @@ struct VideoInfoMessage: Hashable, CustomStringConvertible {
       durationUs: durationUs,
       frameRate: frameRate,
       rotationDegrees: rotationDegrees,
-      hasAudio: hasAudio
+      hasAudio: hasAudio,
+      audioCompatible: audioCompatible
     )
   }
   func toList() -> [Any?] {
@@ -222,13 +227,14 @@ struct VideoInfoMessage: Hashable, CustomStringConvertible {
       frameRate,
       rotationDegrees,
       hasAudio,
+      audioCompatible,
     ]
   }
   static func == (lhs: VideoInfoMessage, rhs: VideoInfoMessage) -> Bool {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return MessagesPigeonInternal.deepEquals(lhs.width, rhs.width) && MessagesPigeonInternal.deepEquals(lhs.height, rhs.height) && MessagesPigeonInternal.deepEquals(lhs.durationUs, rhs.durationUs) && MessagesPigeonInternal.deepEquals(lhs.frameRate, rhs.frameRate) && MessagesPigeonInternal.deepEquals(lhs.rotationDegrees, rhs.rotationDegrees) && MessagesPigeonInternal.deepEquals(lhs.hasAudio, rhs.hasAudio)
+    return MessagesPigeonInternal.deepEquals(lhs.width, rhs.width) && MessagesPigeonInternal.deepEquals(lhs.height, rhs.height) && MessagesPigeonInternal.deepEquals(lhs.durationUs, rhs.durationUs) && MessagesPigeonInternal.deepEquals(lhs.frameRate, rhs.frameRate) && MessagesPigeonInternal.deepEquals(lhs.rotationDegrees, rhs.rotationDegrees) && MessagesPigeonInternal.deepEquals(lhs.hasAudio, rhs.hasAudio) && MessagesPigeonInternal.deepEquals(lhs.audioCompatible, rhs.audioCompatible)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -239,10 +245,11 @@ struct VideoInfoMessage: Hashable, CustomStringConvertible {
     MessagesPigeonInternal.deepHash(value: frameRate, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: rotationDegrees, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: hasAudio, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: audioCompatible, hasher: &hasher)
   }
 
   public var description: String {
-    return "VideoInfoMessage(width: \(String(describing: width)), height: \(String(describing: height)), durationUs: \(String(describing: durationUs)), frameRate: \(String(describing: frameRate)), rotationDegrees: \(String(describing: rotationDegrees)), hasAudio: \(String(describing: hasAudio)))"
+    return "VideoInfoMessage(width: \(String(describing: width)), height: \(String(describing: height)), durationUs: \(String(describing: durationUs)), frameRate: \(String(describing: frameRate)), rotationDegrees: \(String(describing: rotationDegrees)), hasAudio: \(String(describing: hasAudio)), audioCompatible: \(String(describing: audioCompatible)))"
   }
 }
 
@@ -351,7 +358,9 @@ protocol VideoFramesHostApi {
   /// sequential position used by [nextFrame].
   func frameAt(readerId: Int64, timeUs: Int64) throws -> VideoFrameMessage
   func closeReader(readerId: Int64) throws
-  func openWriter(writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?, audioSourcePath: String?) throws
+  /// Returns whether the audio of `audioSourcePath` will be copied; audio
+  /// that can't go into an MP4 unchanged is dropped instead of failing.
+  func openWriter(writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?, audioSourcePath: String?) throws -> Bool
   func addFrame(writerId: Int64, rgba: FlutterStandardTypedData, ptsUs: Int64) throws
   /// Flush, copy the audio track (if any) and close the file.
   func finishWriter(writerId: Int64) throws
@@ -444,6 +453,8 @@ class VideoFramesHostApiSetup {
     } else {
       closeReaderChannel.setMessageHandler(nil)
     }
+    /// Returns whether the audio of `audioSourcePath` will be copied; audio
+    /// that can't go into an MP4 unchanged is dropped instead of failing.
     let openWriterChannel = taskQueue == nil
       ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.openWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
       : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.openWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
@@ -458,8 +469,8 @@ class VideoFramesHostApiSetup {
         let bitRateArg: Int64? = nilOrValue(args[5])
         let audioSourcePathArg: String? = nilOrValue(args[6])
         do {
-          try api.openWriter(writerId: writerIdArg, path: pathArg, width: widthArg, height: heightArg, frameRate: frameRateArg, bitRate: bitRateArg, audioSourcePath: audioSourcePathArg)
-          reply(wrapResult(nil))
+          let result = try api.openWriter(writerId: writerIdArg, path: pathArg, width: widthArg, height: heightArg, frameRate: frameRateArg, bitRate: bitRateArg, audioSourcePath: audioSourcePathArg)
+          reply(wrapResult(result))
         } catch {
           reply(wrapError(error))
         }

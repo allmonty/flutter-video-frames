@@ -10,4 +10,4 @@ afconvert -f m4af -d aac "$out/speech.aiff" "$out/speech.m4a"
 xcrun swiftc -O -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
   ios/Classes/PixelConversion.swift ios/Classes/FrameReader.swift ios/Classes/FrameWriter.swift \
   tool/apple_check/main.swift -o "$out/check" 2>&1 | grep -v "warning\|^ *[0-9]* |\|^ *|\|^$" || true
-"$out/check" "$out/speech.m4a"
+"$out/check" "$out/speech.m4a" "$out/speech.aiff"

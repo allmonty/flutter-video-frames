@@ -201,7 +201,12 @@ data class VideoInfoMessage (
   val frameRate: Double,
   /** Rotation from the file's metadata, already applied to the frames. */
   val rotationDegrees: Long,
-  val hasAudio: Boolean
+  val hasAudio: Boolean,
+  /**
+   * The audio track can be copied into an MP4 unchanged (false when there
+   * is no audio, or its format doesn't fit the MP4 container).
+   */
+  val audioCompatible: Boolean
 )
  {
   companion object {
@@ -212,7 +217,8 @@ data class VideoInfoMessage (
       val frameRate = pigeonVar_list[3] as Double
       val rotationDegrees = pigeonVar_list[4] as Long
       val hasAudio = pigeonVar_list[5] as Boolean
-      return VideoInfoMessage(width, height, durationUs, frameRate, rotationDegrees, hasAudio)
+      val audioCompatible = pigeonVar_list[6] as Boolean
+      return VideoInfoMessage(width, height, durationUs, frameRate, rotationDegrees, hasAudio, audioCompatible)
     }
   }
   fun toList(): List<Any?> {
@@ -223,6 +229,7 @@ data class VideoInfoMessage (
       frameRate,
       rotationDegrees,
       hasAudio,
+      audioCompatible,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -233,7 +240,7 @@ data class VideoInfoMessage (
       return true
     }
     val other = other as VideoInfoMessage
-    return MessagesPigeonUtils.deepEquals(this.width, other.width) && MessagesPigeonUtils.deepEquals(this.height, other.height) && MessagesPigeonUtils.deepEquals(this.durationUs, other.durationUs) && MessagesPigeonUtils.deepEquals(this.frameRate, other.frameRate) && MessagesPigeonUtils.deepEquals(this.rotationDegrees, other.rotationDegrees) && MessagesPigeonUtils.deepEquals(this.hasAudio, other.hasAudio)
+    return MessagesPigeonUtils.deepEquals(this.width, other.width) && MessagesPigeonUtils.deepEquals(this.height, other.height) && MessagesPigeonUtils.deepEquals(this.durationUs, other.durationUs) && MessagesPigeonUtils.deepEquals(this.frameRate, other.frameRate) && MessagesPigeonUtils.deepEquals(this.rotationDegrees, other.rotationDegrees) && MessagesPigeonUtils.deepEquals(this.hasAudio, other.hasAudio) && MessagesPigeonUtils.deepEquals(this.audioCompatible, other.audioCompatible)
   }
 
   override fun hashCode(): Int {
@@ -244,10 +251,11 @@ data class VideoInfoMessage (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.frameRate)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.rotationDegrees)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.hasAudio)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.audioCompatible)
     return result
   }
   override fun toString(): String {
-    return "VideoInfoMessage(width=$width, height=$height, durationUs=$durationUs, frameRate=$frameRate, rotationDegrees=$rotationDegrees, hasAudio=$hasAudio)"
+    return "VideoInfoMessage(width=$width, height=$height, durationUs=$durationUs, frameRate=$frameRate, rotationDegrees=$rotationDegrees, hasAudio=$hasAudio, audioCompatible=$audioCompatible)"
   }
 }
 
@@ -348,7 +356,11 @@ interface VideoFramesHostApi {
    */
   fun frameAt(readerId: Long, timeUs: Long): VideoFrameMessage
   fun closeReader(readerId: Long)
-  fun openWriter(writerId: Long, path: String, width: Long, height: Long, frameRate: Double, bitRate: Long?, audioSourcePath: String?)
+  /**
+   * Returns whether the audio of `audioSourcePath` will be copied; audio
+   * that can't go into an MP4 unchanged is dropped instead of failing.
+   */
+  fun openWriter(writerId: Long, path: String, width: Long, height: Long, frameRate: Double, bitRate: Long?, audioSourcePath: String?): Boolean
   fun addFrame(writerId: Long, rgba: ByteArray, ptsUs: Long)
   /** Flush, copy the audio track (if any) and close the file. */
   fun finishWriter(writerId: Long)
@@ -450,8 +462,7 @@ interface VideoFramesHostApi {
             val bitRateArg = args[5] as Long?
             val audioSourcePathArg = args[6] as String?
             val wrapped: List<Any?> = try {
-              api.openWriter(writerIdArg, pathArg, widthArg, heightArg, frameRateArg, bitRateArg, audioSourcePathArg)
-              listOf(null)
+              listOf(api.openWriter(writerIdArg, pathArg, widthArg, heightArg, frameRateArg, bitRateArg, audioSourcePathArg))
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)
             }

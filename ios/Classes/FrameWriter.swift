@@ -15,6 +15,9 @@ final class FrameWriter {
   private var audioReader: AVAssetReader?
   private var audioOutput: AVAssetReaderTrackOutput?
 
+  /// Whether the audio source's track will be copied.
+  var audioIncluded: Bool { audioReader != nil }
+
   init(path: String, width: Int, height: Int, frameRate: Double, bitRate: Int?, audioSourcePath: String?) throws {
     guard width % 2 == 0, height % 2 == 0 else {
       throw VideoFramesError.writeFailed("size must be even, got \(width)x\(height)")
@@ -49,19 +52,18 @@ final class FrameWriter {
 
     if let audioSourcePath = audioSourcePath {
       let asset = AVURLAsset(url: URL(fileURLWithPath: audioSourcePath))
-      if let track = asset.tracks(withMediaType: .audio).first {
-        let hint = track.formatDescriptions.first.map { $0 as! CMFormatDescription }
-        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: hint)
-        input.expectsMediaDataInRealTime = false
-        if writer.canAdd(input) {
-          writer.add(input)
-          let reader = try AVAssetReader(asset: asset)
-          let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
-          reader.add(output)
-          audioInput = input
-          audioReader = reader
-          audioOutput = output
-        }
+      // Audio the MP4 can't hold unchanged is dropped; the video is still
+      // written. The reader is created first so an input is only added to
+      // the writer when its samples can actually be read.
+      if let track = asset.tracks(withMediaType: .audio).first,
+        let reader = try? AVAssetReader(asset: asset),
+        let input = AudioSupport.passthroughInput(for: track, into: writer)
+      {
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        reader.add(output)
+        audioInput = input
+        audioReader = reader
+        audioOutput = output
       }
     }
 
