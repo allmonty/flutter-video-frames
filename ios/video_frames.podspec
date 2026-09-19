@@ -13,9 +13,9 @@ Frame-by-frame video decoding and encoding with AVFoundation.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  s.source_files = 'video_frames/Sources/video_frames/**/*.swift'
   s.dependency 'Flutter'
-  s.platform = :ios, '13.0'
+  s.platform = :ios, '15.0'
   s.frameworks = 'AVFoundation', 'CoreMedia', 'CoreVideo'
 
   # Flutter.framework does not contain a i386 slice.
@@ -26,5 +26,5 @@ Frame-by-frame video decoding and encoding with AVFoundation.
   # required reason APIs, update the PrivacyInfo.xcprivacy file to describe your
   # plugin's privacy impact, and then uncomment this line. For more information,
   # see https://developer.apple.com/documentation/bundleresources/privacy_manifest_files
-  # s.resource_bundles = {'video_frames_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
+  # s.resource_bundles = {'video_frames_privacy' => ['video_frames/Sources/video_frames/PrivacyInfo.xcprivacy']}
 end

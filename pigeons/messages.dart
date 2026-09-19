@@ -7,7 +7,7 @@ import 'package:pigeon/pigeon.dart';
     dartOut: 'lib/src/messages.g.dart',
     kotlinOut: 'android/src/main/kotlin/com/allmonty/video_frames/Messages.g.kt',
     kotlinOptions: KotlinOptions(package: 'com.allmonty.video_frames'),
-    swiftOut: 'ios/Classes/Messages.g.swift',
+    swiftOut: 'ios/video_frames/Sources/video_frames/Messages.g.swift',
     dartPackageName: 'video_frames',
   ),
 )
