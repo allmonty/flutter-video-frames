@@ -43,7 +43,8 @@ class _DemoPageState extends State<DemoPage> {
     await reader.close();
     setState(() {
       _frame = frame;
-      _status = '${reader.info.width}x${reader.info.height}, '
+      _status =
+          '${reader.info.width}x${reader.info.height}, '
           '${reader.info.duration.inMilliseconds} ms, frame at ${frame.pts.inMilliseconds} ms';
     });
   }
@@ -84,8 +85,9 @@ class _RgbaView extends StatelessWidget {
         final codec = await descriptor.instantiateCodec();
         return (await codec.getNextFrame()).image;
       }(),
-      builder: (context, snapshot) =>
-          snapshot.hasData ? RawImage(image: snapshot.data, width: 256) : const SizedBox(height: 144),
+      builder: (context, snapshot) => snapshot.hasData
+          ? RawImage(image: snapshot.data, width: 256)
+          : const SizedBox(height: 144),
     );
   }
 }
