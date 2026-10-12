@@ -13,4 +13,15 @@ xcrun swiftc -O -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
   $src/PixelConversion.swift $src/FrameReader.swift $src/FrameWriter.swift \
   tool/apple_check/main.swift -o "$out/check" 2>&1 | grep -v "warning\|^ *[0-9]* |\|^ *|\|^$" || true
 [ -x "$out/check" ] || { echo "FAIL build (see errors above)"; exit 1; }
-"$out/check"
+if "$out/check" > "$out/log" 2>&1; then
+  cat "$out/log"
+else
+  status=$?
+  cat "$out/log"
+  # On GitHub Actions, also show the last lines as an annotation, which is
+  # readable on the run page and through the API without opening the log.
+  if [ -n "$GITHUB_ACTIONS" ]; then
+    echo "::error title=apple_check failed (exit $status)::$(tail -6 "$out/log" | tr '\n' '|')"
+  fi
+  exit 1
+fi
