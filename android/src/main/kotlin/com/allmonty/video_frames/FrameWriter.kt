@@ -2,7 +2,6 @@ package com.allmonty.video_frames
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
-import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
@@ -26,19 +25,42 @@ class FrameWriter(
 ) {
     private val mime = if (videoCodec == VideoCodec.HEVC) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
 
+    private val codec: MediaCodec
+    private val inputSurface: Surface
+
     init {
         require(width % 2 == 0 && height % 2 == 0) { "size must be even, got ${width}x$height" }
-        val wanted = MediaFormat.createVideoFormat(mime, width, height)
-        if (MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(wanted) == null) {
-            throw UnsupportedOperationException("${videoCodec.name} encoding at ${width}x$height is not supported on this device")
+        val format = MediaFormat.createVideoFormat(mime, width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitRate ?: defaultBitRate(width, height, frameRate))
+            setFloat(MediaFormat.KEY_FRAME_RATE, frameRate.toFloat())
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            // Ask for, and tag, BT.709 so players don't guess (HD is 709; untagged often reads as 601).
+            setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+            setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+            setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
         }
+        val candidates = Codecs.names(mime, encoder = true) { it.videoCapabilities?.isSizeSupported(width, height) == true }
+        val (started, surface) = Codecs.startFirst(candidates, "${videoCodec.name} encoder at ${width}x$height") { c ->
+            c.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            val input = c.createInputSurface()
+            try {
+                c.start()
+            } catch (e: Exception) {
+                input.release()
+                throw e
+            }
+            input
+        }
+        codec = started
+        inputSurface = surface
     }
 
-    private val codec: MediaCodec = MediaCodec.createEncoderByType(mime)
     private val muxer = try {
         MediaMuxer(path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
     } catch (e: Exception) {
         codec.release()
+        inputSurface.release()
         throw e
     }
     private val info = MediaCodec.BufferInfo()
@@ -47,7 +69,6 @@ class FrameWriter(
 
     private var audioExtractor: MediaExtractor? = null
     private var audioTrack = -1
-    private var inputSurface: Surface? = null
     private var renderer: GlRenderer? = null
 
     /** Whether the audio source's track will be copied (see [AudioSupport]). */
@@ -56,21 +77,7 @@ class FrameWriter(
 
     init {
         try {
-            val format = MediaFormat.createVideoFormat(mime, width, height).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, bitRate ?: defaultBitRate(width, height, frameRate))
-                setFloat(MediaFormat.KEY_FRAME_RATE, frameRate.toFloat())
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                // Ask for, and tag, BT.709 so players don't guess (HD is 709; untagged often reads as 601).
-                setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
-                setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
-                setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
-            }
-            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            val input = codec.createInputSurface().also { inputSurface = it }
-            codec.start()
-            renderer = GlRenderer.forEncoding(input, width, height)
-
+            renderer = GlRenderer.forEncoding(inputSurface, width, height)
             if (audioSourcePath != null) openAudio(audioSourcePath)
         } catch (e: Exception) {
             cancel()
@@ -178,7 +185,7 @@ class FrameWriter(
         try { codec.stop() } catch (_: IllegalStateException) {}
         codec.release()
         renderer?.release()
-        inputSurface?.release()
+        inputSurface.release()
         try { if (muxerStarted) muxer.stop() } catch (_: IllegalStateException) {}
         muxer.release()
         audioExtractor?.release()

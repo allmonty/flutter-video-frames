@@ -144,9 +144,8 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
             val format = extractor.getTrackFormat(track)
             val trackMime = format.getString(MediaFormat.KEY_MIME)!!
             val mime = decodableMime(format)
-            val codec = createDecoder(format, mime)
-            description = "${codec.name} ($mime ${format.getInteger(MediaFormat.KEY_WIDTH)}x${format.getInteger(MediaFormat.KEY_HEIGHT)})"
-            try {
+            val size = "${format.getInteger(MediaFormat.KEY_WIDTH)}x${format.getInteger(MediaFormat.KEY_HEIGHT)}"
+            val (codec, _) = Codecs.startFirst(decoderNames(format, mime), "$mime decoder at $size") { codec ->
                 // Rotation isn't passed on: the renderer applies it.
                 val config = MediaFormat.createVideoFormat(mime, format.getInteger(MediaFormat.KEY_WIDTH), format.getInteger(MediaFormat.KEY_HEIGHT))
                 // A Dolby Vision base layer only needs the HEVC/AVC parameter sets (csd-0).
@@ -162,10 +161,8 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
                 // shortcut: below API 33 HDR input isn't tone-mapped (looks washed out); tone-map in the shader if users hit it.
                 codec.configure(config, renderer.surface, null, 0)
                 codec.start()
-            } catch (e: Exception) {
-                codec.release()
-                throw e
             }
+            description = "${codec.name} ($mime $size)"
             return codec
         }
 
@@ -286,10 +283,11 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
         }
 
         /**
-         * A decoder that supports the track's profile (e.g. 10-bit HEVC):
-         * the default decoder for a type may not, as on the emulator.
+         * Decoders that support the track's profile (e.g. 10-bit HEVC), in
+         * preference order: a type's default decoder may not, as on the
+         * emulator. Falls back to every decoder of the type if none claims it.
          */
-        private fun createDecoder(track: MediaFormat, mime: String): MediaCodec {
+        private fun decoderNames(track: MediaFormat, mime: String): List<String> {
             val wanted = MediaFormat.createVideoFormat(mime, track.getInteger(MediaFormat.KEY_WIDTH), track.getInteger(MediaFormat.KEY_HEIGHT))
             val profile = when {
                 // Dolby Vision profile 8's base layer is always 10-bit HEVC.
@@ -300,8 +298,8 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
                 else -> null
             }
             if (profile != null) wanted.setInteger(MediaFormat.KEY_PROFILE, profile)
-            val name = MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(wanted)
-            return if (name != null) MediaCodec.createByCodecName(name) else MediaCodec.createDecoderByType(mime)
+            return Codecs.names(mime, encoder = false) { it.isFormatSupported(wanted) }
+                .ifEmpty { Codecs.names(mime, encoder = false) { true } }
         }
 
         private const val TIMEOUT_US = 10_000L

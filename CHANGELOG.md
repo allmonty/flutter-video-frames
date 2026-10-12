@@ -45,6 +45,10 @@
   On SDR video it made Qualcomm decoders fail ("not a supported pixel
   format"), so videos the plugin itself wrote couldn't be read on those
   phones.
+- Android: encoders and decoders are tried in the device's preference order
+  until one starts, ending with Android's software codecs. Vendor codecs can
+  claim a format and still fail to start (Qualcomm's H.264 encoder at 64x64
+  and 256x64); those sizes now fall back instead of failing.
 
 ## 0.3.0
 
