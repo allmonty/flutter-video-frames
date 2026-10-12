@@ -2,7 +2,7 @@ import AVFoundation
 import CoreMedia
 import CoreVideo
 
-/// Encodes RGBA frames to H.264 in an MP4 with `AVAssetWriter`, optionally
+/// Encodes RGBA frames to H.264 or HEVC in an MP4 with `AVAssetWriter`, optionally
 /// copying another file's audio track (passthrough, no re-encoding).
 final class FrameWriter {
   private let url: URL
@@ -18,7 +18,10 @@ final class FrameWriter {
   /// Whether the audio source's track will be copied.
   var audioIncluded: Bool { audioReader != nil }
 
-  init(path: String, width: Int, height: Int, frameRate: Double, bitRate: Int?, audioSourcePath: String?) throws {
+  init(
+    path: String, width: Int, height: Int, frameRate: Double, bitRate: Int?, audioSourcePath: String?,
+    hevc: Bool = false
+  ) throws {
     guard width % 2 == 0, height % 2 == 0 else {
       throw VideoFramesError.writeFailed("size must be even, got \(width)x\(height)")
     }
@@ -29,23 +32,27 @@ final class FrameWriter {
     writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
 
     let bits = bitRate ?? FrameWriter.defaultBitRate(width: width, height: height, frameRate: frameRate)
-    videoInput = AVAssetWriterInput(
-      mediaType: .video,
-      outputSettings: [
-        AVVideoCodecKey: AVVideoCodecType.h264,
-        AVVideoWidthKey: width,
-        AVVideoHeightKey: height,
-        // Tag BT.709 so players don't guess (HD is 709; untagged often reads as 601).
-        AVVideoColorPropertiesKey: [
-          AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
-          AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
-          AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
-        ],
-        AVVideoCompressionPropertiesKey: [
-          AVVideoAverageBitRateKey: bits,
-          AVVideoMaxKeyFrameIntervalKey: max(1, Int(frameRate.rounded())),
-        ],
-      ])
+    let settings: [String: Any] = [
+      AVVideoCodecKey: hevc ? AVVideoCodecType.hevc : AVVideoCodecType.h264,
+      AVVideoWidthKey: width,
+      AVVideoHeightKey: height,
+      // Tag BT.709 so players don't guess (HD is 709; untagged often reads as 601).
+      AVVideoColorPropertiesKey: [
+        AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+        AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+        AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+      ],
+      AVVideoCompressionPropertiesKey: [
+        AVVideoAverageBitRateKey: bits,
+        AVVideoMaxKeyFrameIntervalKey: max(1, Int(frameRate.rounded())),
+      ],
+    ]
+    // Devices without an HEVC encoder (e.g. A9 chips) can't apply these settings.
+    guard writer.canApply(outputSettings: settings, forMediaType: .video) else {
+      throw VideoFramesError.writeFailed(
+        "\(hevc ? "HEVC" : "H.264") encoding at \(width)x\(height) is not supported on this device")
+    }
+    videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
     videoInput.expectsMediaDataInRealTime = false
     adaptor = AVAssetWriterInputPixelBufferAdaptor(
       assetWriterInput: videoInput,

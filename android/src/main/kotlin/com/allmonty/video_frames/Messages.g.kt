@@ -217,6 +217,24 @@ enum class ScaleFilter(val raw: Int) {
   }
 }
 
+/** The video codec a writer encodes with. */
+enum class VideoCodec(val raw: Int) {
+  /** Plays everywhere. */
+  H264(0),
+  /**
+   * About half the size of H.264 at the same quality; needs a device with
+   * an HEVC encoder (writer creation fails otherwise) and a player that
+   * supports it.
+   */
+  HEVC(1);
+
+  companion object {
+    fun ofRaw(raw: Int): VideoCodec? {
+      return values().firstOrNull { it.raw == raw }
+    }
+  }
+}
+
 /** Generated class from Pigeon that represents data sent in messages. */
 data class VideoInfoMessage (
   /** Frame size as delivered (after rotation and scaling). */
@@ -342,11 +360,16 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         }
       }
       130.toByte() -> {
+        return (readValue(buffer) as Long?)?.let {
+          VideoCodec.ofRaw(it.toInt())
+        }
+      }
+      131.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           VideoInfoMessage.fromList(it)
         }
       }
-      131.toByte() -> {
+      132.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           VideoFrameMessage.fromList(it)
         }
@@ -360,12 +383,16 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         stream.write(129)
         writeValue(stream, value.raw.toLong())
       }
-      is VideoInfoMessage -> {
+      is VideoCodec -> {
         stream.write(130)
+        writeValue(stream, value.raw.toLong())
+      }
+      is VideoInfoMessage -> {
+        stream.write(131)
         writeValue(stream, value.toList())
       }
       is VideoFrameMessage -> {
-        stream.write(131)
+        stream.write(132)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -485,7 +512,7 @@ interface VideoWriterHostApi {
    * Returns whether the audio of `audioSourcePath` will be copied; audio
    * that can't go into an MP4 unchanged is dropped instead of failing.
    */
-  fun openWriter(writerId: Long, path: String, width: Long, height: Long, frameRate: Double, bitRate: Long?, audioSourcePath: String?): Boolean
+  fun openWriter(writerId: Long, path: String, width: Long, height: Long, frameRate: Double, bitRate: Long?, audioSourcePath: String?, codec: VideoCodec): Boolean
   fun addFrame(writerId: Long, rgba: ByteArray, ptsUs: Long)
   /** Flush, copy the audio track (if any) and close the file. */
   fun finishWriter(writerId: Long)
@@ -514,8 +541,9 @@ interface VideoWriterHostApi {
             val frameRateArg = args[4] as Double
             val bitRateArg = args[5] as Long?
             val audioSourcePathArg = args[6] as String?
+            val codecArg = args[7] as VideoCodec
             val wrapped: List<Any?> = try {
-              listOf(api.openWriter(writerIdArg, pathArg, widthArg, heightArg, frameRateArg, bitRateArg, audioSourcePathArg))
+              listOf(api.openWriter(writerIdArg, pathArg, widthArg, heightArg, frameRateArg, bitRateArg, audioSourcePathArg, codecArg))
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)
             }

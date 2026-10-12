@@ -14,7 +14,7 @@ run its own image filters on every frame of a video and export the filtered
 result, without bundling a heavy video library like FFmpeg.
 
 **Technically:** it decodes video files to RGBA frames and encodes RGBA frames
-to H.264 in an MP4, using the phone's own hardware/system codecs (no FFmpeg).
+to H.264 or HEVC in an MP4, using the phone's own hardware/system codecs (no FFmpeg).
 
 ## Platforms
 
@@ -29,7 +29,7 @@ to H.264 in an MP4, using the phone's own hardware/system codecs (no FFmpeg).
 - **Read:** decode a video to upright RGBA frames, with rotation metadata
   applied and optional downscaling. Frames come one by one, or at a given
   time for scrubbing.
-- **Write:** encode RGBA frames to H.264 in an MP4, optionally copying
+- **Write:** encode RGBA frames to H.264 or HEVC in an MP4, optionally copying
   another file's audio track through unchanged.
 
 Every call runs on a background queue on the platform side. The API also
@@ -109,7 +109,7 @@ What counts as compatible depends on the platform:
   accepts AAC and even PCM. PCM-in-MP4 plays on Apple devices but may not
   play everywhere else.
 
-H.264 needs even dimensions. `VideoWriter` rounds the size down to even
+H.264 and HEVC need even dimensions. `VideoWriter` rounds the size down to even
 numbers (`writer.width` and `writer.height`) and crops frames given at the
 requested size.
 
@@ -119,6 +119,16 @@ Written videos are tagged as BT.709 SDR, the standard for HD, so players
 don't have to guess. When reading, iOS converts with the video's own color
 tags. On Android the GPU driver is expected to apply them; the Android
 emulator's doesn't, so colors read there can be slightly off.
+
+HDR input (HLG or PQ, like iPhone videos) is converted to SDR when read: iOS
+uses AVFoundation's tone mapping; Android 13+ asks the decoder to tone-map
+(below Android 13 HDR frames look washed out). Android plays iPhones' Dolby
+Vision videos through their HEVC base layer when the device has no Dolby
+Vision decoder.
+
+`codec: VideoCodec.hevc` writes HEVC instead of H.264: about half the file
+size at the same quality, but writer creation fails on devices without an
+HEVC encoder, so fall back to H.264 when it throws.
 
 ## How it works
 

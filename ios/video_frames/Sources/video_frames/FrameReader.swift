@@ -48,8 +48,10 @@ enum AudioSupport {
 }
 
 /// Decodes a file's video track to upright RGBA frames (rotation metadata
-/// applied), optionally scaled down. Sequential frames come from an
-/// `AVAssetReader`; random access (`frame(at:)`) uses `AVAssetImageGenerator`.
+/// applied), optionally scaled down. Sequential frames come from one
+/// `AVAssetReader`; random access (`frame(atUs:)`) starts a short-lived one at
+/// the requested time, so both convert colors the same way (HDR included:
+/// AVFoundation tone-maps it to SDR).
 final class FrameReader {
   let width: Int
   let height: Int
@@ -62,19 +64,12 @@ final class FrameReader {
   let audioCompatible: Bool
 
   private let asset: AVURLAsset
+  private let track: AVAssetTrack
   private let reader: AVAssetReader
   private let output: AVAssetReaderTrackOutput
   private let srcWidth: Int
   private let srcHeight: Int
   private let filter: PixelConversion.Filter
-  /// Full size, so frames are scaled with `filter` exactly like `next()`.
-  private lazy var generator: AVAssetImageGenerator = {
-    let generator = AVAssetImageGenerator(asset: asset)
-    generator.appliesPreferredTrackTransform = true
-    generator.requestedTimeToleranceBefore = .zero
-    generator.requestedTimeToleranceAfter = .zero
-    return generator
-  }()
 
   init(path: String, maxDimension: Int?, filter: PixelConversion.Filter = .nearest) throws {
     self.filter = filter
@@ -82,6 +77,7 @@ final class FrameReader {
     guard let track = asset.tracks(withMediaType: .video).first else {
       throw VideoFramesError.noVideoTrack(path)
     }
+    self.track = track
     srcWidth = Int(track.naturalSize.width)
     srcHeight = Int(track.naturalSize.height)
     let t = track.preferredTransform
@@ -94,8 +90,16 @@ final class FrameReader {
     hasAudio = audioTrack != nil
     audioCompatible = audioTrack.map(AudioSupport.canCopyIntoMp4) ?? false
 
-    reader = try AVAssetReader(asset: asset)
-    output = AVAssetReaderTrackOutput(
+    (reader, output) = try FrameReader.startReading(asset, track, from: nil)
+  }
+
+  /// A BGRA reader over `track`, from `start` to the end (or all of it).
+  private static func startReading(_ asset: AVAsset, _ track: AVAssetTrack, from start: CMTime?) throws
+    -> (AVAssetReader, AVAssetReaderTrackOutput)
+  {
+    let reader = try AVAssetReader(asset: asset)
+    if let start = start { reader.timeRange = CMTimeRange(start: start, end: .positiveInfinity) }
+    let output = AVAssetReaderTrackOutput(
       track: track,
       outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
     output.alwaysCopiesSampleData = false
@@ -103,6 +107,7 @@ final class FrameReader {
     if !reader.startReading() {
       throw VideoFramesError.readFailed(reader.error?.localizedDescription ?? "cannot start reading")
     }
+    return (reader, output)
   }
 
   /// The next frame in presentation order, or nil at the end.
@@ -118,28 +123,28 @@ final class FrameReader {
     return nil
   }
 
-  /// The frame at (or nearest to) `timeUs`, upright and scaled like `next()`.
+  /// The first frame at or after `timeUs` (the last frame when `timeUs` is
+  /// past the end), upright, scaled and color-converted like `next()`.
   func frame(atUs timeUs: Int64) throws -> (ptsUs: Int64, rgba: [UInt8]) {
-    var actual = CMTime.zero
-    let image = try generator.copyCGImage(
-      at: CMTime(value: timeUs, timescale: 1_000_000), actualTime: &actual)
-    // Draw the upright full-size frame as BGRA, then convert like next() (no rotation left).
-    let (w, h) = (image.width, image.height)
-    var bgra = [UInt8](repeating: 0, count: w * h * 4)
-    let rgba = try bgra.withUnsafeMutableBytes { buffer -> [UInt8] in
-      guard
-        let base = buffer.baseAddress,
-        let context = CGContext(
-          data: base, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-          space: CGColorSpaceCreateDeviceRGB(),
-          bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue)
-      else { throw VideoFramesError.readFailed("cannot draw frame") }
-      context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-      return PixelConversion.bgraToRgba(
-        base.assumingMemoryBound(to: UInt8.self), srcWidth: w, srcHeight: h, bytesPerRow: w * 4,
-        rotation: 0, dstWidth: width, dstHeight: height, filter: filter)
+    let target = CMTime(value: timeUs, timescale: 1_000_000)
+    // Start a second before the end at the latest, so a time past the end
+    // still finds the last frame.
+    let latest = CMTimeSubtract(asset.duration, CMTime(value: 1, timescale: 1))
+    let (seeker, frames) = try FrameReader.startReading(
+      asset, track, from: CMTimeMaximum(.zero, CMTimeMinimum(target, latest)))
+    defer { seeker.cancelReading() }
+    var last: (CMTime, CVPixelBuffer)?
+    while let sample = frames.copyNextSampleBuffer() {
+      guard let pixels = CMSampleBufferGetImageBuffer(sample) else { continue }
+      let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+      last = (pts, pixels)
+      if pts >= target { break }
     }
-    return (Int64(CMTimeGetSeconds(actual) * 1_000_000), rgba)
+    if seeker.status == .failed {
+      throw VideoFramesError.readFailed(seeker.error?.localizedDescription ?? "unknown error")
+    }
+    guard let (pts, pixels) = last else { throw VideoFramesError.readFailed("no frame at \(timeUs) us") }
+    return (Int64(CMTimeGetSeconds(pts) * 1_000_000), try convert(pixels))
   }
 
   func close() {

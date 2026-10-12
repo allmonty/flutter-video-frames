@@ -1,4 +1,4 @@
-/// Decode video frames to RGBA and encode RGBA frames to H.264 MP4 (with the
+/// Decode video frames to RGBA and encode RGBA frames to H.264 or HEVC MP4 (with the
 /// source's audio copied through), on Android and iOS.
 ///
 /// Every call runs on a background queue on the platform side, and the API
@@ -11,7 +11,13 @@ import 'dart:typed_data';
 import 'src/messages.g.dart';
 
 export 'src/messages.g.dart'
-    show ScaleFilter, VideoFrameMessage, VideoInfoMessage, VideoReaderHostApi, VideoWriterHostApi;
+    show
+        ScaleFilter,
+        VideoCodec,
+        VideoFrameMessage,
+        VideoInfoMessage,
+        VideoReaderHostApi,
+        VideoWriterHostApi;
 
 /// Metadata of an opened video.
 class VideoInfo {
@@ -146,7 +152,7 @@ class VideoReader {
   );
 }
 
-/// Encodes RGBA frames into an H.264 MP4. Always [finish] or [cancel] it: it
+/// Encodes RGBA frames into an H.264 or HEVC MP4. Always [finish] or [cancel] it: it
 /// holds a hardware encoder until then.
 class VideoWriter {
   VideoWriter._(
@@ -181,6 +187,8 @@ class VideoWriter {
 
   /// Create `path` (overwritten if it exists). With `audioSourcePath`, that
   /// file's audio track is copied into the output when [finish] is called.
+  /// [VideoCodec.hevc] makes smaller files but fails on devices without an
+  /// HEVC encoder; fall back to [VideoCodec.h264] when it throws.
   static Future<VideoWriter> create(
     String path, {
     required int width,
@@ -188,6 +196,7 @@ class VideoWriter {
     required double frameRate,
     int? bitRate,
     String? audioSourcePath,
+    VideoCodec codec = VideoCodec.h264,
   }) async {
     final w = width & ~1, h = height & ~1;
     if (w < 2 || h < 2) throw ArgumentError('video must be at least 2x2, got ${width}x$height');
@@ -200,6 +209,7 @@ class VideoWriter {
       frameRate,
       bitRate,
       audioSourcePath,
+      codec,
     );
     return VideoWriter._(id, w, h, width, height, audio);
   }

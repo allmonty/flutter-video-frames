@@ -32,6 +32,29 @@ let format = AVURLAsset(url: URL(fileURLWithPath: path)).tracks(withMediaType: .
 let matrix = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_YCbCrMatrix) as? String
 check(matrix == (kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2 as String), "output tagged BT.709 (\(matrix ?? "untagged"))")
 
+// HEVC: a round trip through the HEVC encoder.
+let hevcPath = NSTemporaryDirectory() + "vf_check_hevc.mp4"
+let hevcWriter = try FrameWriter(path: hevcPath, width: w, height: h, frameRate: 30, bitRate: nil, audioSourcePath: nil, hevc: true)
+for i in 0..<10 { try hevcWriter.addFrame(rgba: frame(w, h, i), ptsUs: Int64(i) * 33333) }
+try hevcWriter.finish()
+let hevcFormat = AVURLAsset(url: URL(fileURLWithPath: hevcPath)).tracks(withMediaType: .video)[0].formatDescriptions[0] as! CMFormatDescription
+check(CMFormatDescriptionGetMediaSubType(hevcFormat) == kCMVideoCodecType_HEVC, "HEVC writer writes HEVC")
+let hevcReader = try FrameReader(path: hevcPath, maxDimension: nil)
+var hevcFrames = 0
+var hevcFirst: [UInt8]?
+while let f = try hevcReader.next() { hevcFirst = hevcFirst ?? f.rgba; hevcFrames += 1 }
+check(hevcFrames == 10, "HEVC decoded \(hevcFrames) frames")
+check(hevcFirst![o] > 170 && hevcFirst![o + 1] < 100, "HEVC top-left is red")
+
+// HDR (HLG / BT.2020, 10-bit HEVC) input: AVFoundation tone-maps it to SDR, and frameAt matches next().
+let hlg = try FrameReader(path: "example/integration_test/assets/hlg.mp4", maxDimension: nil)
+let hlgNext = try hlg.next()!.rgba
+let hlgSeek = try hlg.frame(atUs: 0).rgba
+let gray = ((270 * hlg.width + 480) * 4)
+let (gr, gg, gb) = (Int(hlgNext[gray]), Int(hlgNext[gray + 1]), Int(hlgNext[gray + 2]))
+check(abs(gr - gg) < 12 && abs(gg - gb) < 12 && gg > 60 && gg < 200, "HDR gray stays neutral and mid-range: \(gr) \(gg) \(gb)")
+check(zip(hlgNext, hlgSeek).allSatisfy { abs(Int($0) - Int($1)) <= 12 }, "HDR frameAt matches next()")
+
 // HD colors that shift by 20+ under a 601/709 mix-up survive a round trip.
 let hdColors: [(UInt8, UInt8, UInt8)] = [(40, 200, 60), (224, 172, 140), (200, 40, 40), (40, 60, 200)]
 let (hw, hh) = (1280, 720)

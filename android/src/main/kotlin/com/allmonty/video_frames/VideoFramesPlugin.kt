@@ -67,8 +67,9 @@ class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi 
         frameRate: Double,
         bitRate: Long?,
         audioSourcePath: String?,
+        codec: VideoCodec,
     ): Boolean {
-        val writer = FrameWriter(path, width.toInt(), height.toInt(), frameRate, bitRate?.toInt(), audioSourcePath)
+        val writer = FrameWriter(path, width.toInt(), height.toInt(), frameRate, bitRate?.toInt(), audioSourcePath, codec)
         synchronized(this) { writers[writerId] = writer }
         return writer.audioIncluded
     }

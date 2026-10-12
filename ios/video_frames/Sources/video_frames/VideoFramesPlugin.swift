@@ -106,12 +106,12 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
 
   func openWriter(
     writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?,
-    audioSourcePath: String?
+    audioSourcePath: String?, codec: VideoCodec
   ) throws -> Bool {
     try bridged {
       let writer = try FrameWriter(
         path: path, width: Int(width), height: Int(height), frameRate: frameRate,
-        bitRate: bitRate.map { Int($0) }, audioSourcePath: audioSourcePath)
+        bitRate: bitRate.map { Int($0) }, audioSourcePath: audioSourcePath, hevc: codec == .hevc)
       lock.lock()
       writers[writerId] = writer
       lock.unlock()

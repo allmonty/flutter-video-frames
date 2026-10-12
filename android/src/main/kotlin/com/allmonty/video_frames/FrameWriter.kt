@@ -2,6 +2,7 @@ package com.allmonty.video_frames
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
@@ -10,7 +11,7 @@ import java.io.File
 import java.nio.ByteBuffer
 
 /**
- * Encodes RGBA frames to H.264 in an MP4, optionally copying the audio track
+ * Encodes RGBA frames to H.264 or HEVC in an MP4, optionally copying the audio track
  * of another file. Frames are drawn into the encoder's input surface by
  * [GlRenderer], with explicit timestamps.
  */
@@ -21,12 +22,19 @@ class FrameWriter(
     frameRate: Double,
     bitRate: Int?,
     audioSourcePath: String?,
+    videoCodec: VideoCodec = VideoCodec.H264,
 ) {
+    private val mime = if (videoCodec == VideoCodec.HEVC) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+
     init {
         require(width % 2 == 0 && height % 2 == 0) { "size must be even, got ${width}x$height" }
+        val wanted = MediaFormat.createVideoFormat(mime, width, height)
+        if (MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(wanted) == null) {
+            throw UnsupportedOperationException("${videoCodec.name} encoding at ${width}x$height is not supported on this device")
+        }
     }
 
-    private val codec: MediaCodec = MediaCodec.createEncoderByType(MIME)
+    private val codec: MediaCodec = MediaCodec.createEncoderByType(mime)
     private val muxer = try {
         MediaMuxer(path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
     } catch (e: Exception) {
@@ -48,7 +56,7 @@ class FrameWriter(
 
     init {
         try {
-            val format = MediaFormat.createVideoFormat(MIME, width, height).apply {
+            val format = MediaFormat.createVideoFormat(mime, width, height).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, bitRate ?: defaultBitRate(width, height, frameRate))
                 setFloat(MediaFormat.KEY_FRAME_RATE, frameRate.toFloat())
@@ -81,8 +89,8 @@ class FrameWriter(
             extractor.setDataSource(source)
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-                if (!mime.startsWith("audio/")) continue
+                val trackMime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (!trackMime.startsWith("audio/")) continue
                 audioTrack = muxer.addTrack(format)
                 extractor.selectTrack(i)
                 audioExtractor = extractor
@@ -177,7 +185,6 @@ class FrameWriter(
     }
 
     companion object {
-        private const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
         private const val TIMEOUT_US = 10_000L
         private const val STALL_MS = 5_000L
 

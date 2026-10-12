@@ -26,6 +26,14 @@
   encoding (see the pipelined loop in the README). The test seam
   `VideoFrames.api` is replaced by `VideoFrames.readerApi` and
   `VideoFrames.writerApi`.
+- `VideoWriter.create(..., codec: VideoCodec.hevc)` writes HEVC; it fails
+  with a clear error on devices without an HEVC encoder.
+- HDR input: iOS `frameAt` now decodes with `AVAssetReader` like `nextFrame`,
+  so HDR frames get the same tone mapping (the image generator path was
+  darker and differently colored). Android 13+ asks decoders to tone-map
+  HDR to SDR, plays Dolby Vision 8/9 (e.g. iPhone videos) through the HEVC/AVC
+  base layer when there is no Dolby Vision decoder, and picks a decoder that
+  supports the track's profile (e.g. 10-bit) instead of the default one.
 
 ## 0.3.0
 

@@ -180,6 +180,38 @@ void main() {
     }
   });
 
+  testWidgets('HDR (HLG) input decodes to SDR (skipped without a 10-bit HEVC decoder)', (
+    tester,
+  ) async {
+    // HEVC Main10, HLG / BT.2020, which Android reports as Dolby Vision 8.4
+    // (like iPhone videos); see tool/make_fixtures.swift. The bottom-right
+    // quadrant was SDR gray 128.
+    final data = await rootBundle.load('integration_test/assets/hlg.mp4');
+    final path = '${Directory.systemTemp.path}/video_frames_hlg.mp4';
+    File(path).writeAsBytesSync(data.buffer.asUint8List());
+    final reader = await VideoReader.open(path);
+    final VideoFrame viaNext, viaSeek;
+    try {
+      viaNext = (await reader.nextFrame())!;
+      viaSeek = await reader.frameAt(Duration.zero);
+    } on PlatformException catch (e) {
+      // The Android emulator's HEVC decoders can't decode 10-bit video.
+      markTestSkipped('cannot decode 10-bit HEVC here: ${e.message}');
+      return;
+    } finally {
+      await reader.close();
+    }
+    final o = (270 * viaNext.width + 480) * 4;
+    final (r, g, b) = (viaNext.rgba[o], viaNext.rgba[o + 1], viaNext.rgba[o + 2]);
+    expect(
+      (r - g).abs() < 12 && (g - b).abs() < 12,
+      isTrue,
+      reason: 'gray stays neutral: $r $g $b',
+    );
+    expect(g > 60 && g < 200, isTrue, reason: 'gray stays mid-range: $g');
+    expectPixel(viaSeek, 480, 270, (r, g, b), 'frameAt matches nextFrame', 12);
+  });
+
   testWidgets('1080p speed (logged, not asserted)', (tester) async {
     const width = 1920, height = 1080, frames = 60;
     final path = '${Directory.systemTemp.path}/video_frames_1080p.mp4';
@@ -283,6 +315,37 @@ void main() {
     expect((scaled.info.width, scaled.info.height), (160, 120));
     await scaled.close();
     await reader.close();
+  });
+
+  testWidgets('HEVC round trip (skipped without an HEVC encoder)', (tester) async {
+    const width = 320, height = 240, frames = 10;
+    final path = '${Directory.systemTemp.path}/video_frames_hevc.mp4';
+    final VideoWriter writer;
+    try {
+      writer = await VideoWriter.create(
+        path,
+        width: width,
+        height: height,
+        frameRate: 30,
+        codec: VideoCodec.hevc,
+      );
+    } on PlatformException catch (e) {
+      markTestSkipped('no HEVC encoder: ${e.message}');
+      return;
+    }
+    for (var i = 0; i < frames; i++) {
+      await writer.addFrame(syntheticFrame(width, height, i), Duration(microseconds: i * 33333));
+    }
+    await writer.finish();
+    final reader = await VideoReader.open(path);
+    final first = (await reader.nextFrame())!;
+    var count = 1;
+    while (await reader.nextFrame() != null) {
+      count++;
+    }
+    await reader.close();
+    expect(count, frames);
+    expectPixel(first, width ~/ 4, height ~/ 4, (220, 40, 40), 'HEVC top-left red');
   });
 
   testWidgets('cancel deletes the partial file', (tester) async {

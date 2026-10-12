@@ -64,8 +64,9 @@ class FakeWriterApi extends VideoWriterHostApi {
     double frameRate,
     int? bitRate,
     String? audioSourcePath,
+    VideoCodec codec,
   ) async {
-    calls.add('writer $path ${width}x$height $frameRate $bitRate $audioSourcePath');
+    calls.add('writer $path ${width}x$height $frameRate $bitRate $audioSourcePath ${codec.name}');
     writerSizes[writerId] = (width, height);
     written[writerId] = [];
     // Pretend '.pcm' sources hold audio that can't go into an MP4.
@@ -158,7 +159,7 @@ void main() {
     test('rounds odd sizes down to even and crops frames to fit', () async {
       final writer = await VideoWriter.create('/o.mp4', width: 5, height: 3, frameRate: 30);
       expect((writer.width, writer.height), (4, 2));
-      expect(calls.single, 'writer /o.mp4 4x2 30.0 null null');
+      expect(calls.single, 'writer /o.mp4 4x2 30.0 null null h264');
 
       // A 5x3 frame whose pixel (x, y) has red = 10*y + x.
       final full = Uint8List(5 * 3 * 4);
@@ -194,7 +195,7 @@ void main() {
         bitRate: 500000,
         audioSourcePath: '/in.mov',
       );
-      expect(calls.single, 'writer /o.mp4 8x8 24.0 500000 /in.mov');
+      expect(calls.single, 'writer /o.mp4 8x8 24.0 500000 /in.mov h264');
       expect(kept.includesAudio, isTrue);
       final dropped = await VideoWriter.create(
         '/o.mp4',
@@ -206,6 +207,17 @@ void main() {
       expect(dropped.includesAudio, isFalse);
       final none = await VideoWriter.create('/o.mp4', width: 8, height: 8, frameRate: 24);
       expect(none.includesAudio, isFalse);
+    });
+
+    test('passes the codec', () async {
+      await VideoWriter.create(
+        '/o.mp4',
+        width: 8,
+        height: 8,
+        frameRate: 24,
+        codec: VideoCodec.hevc,
+      );
+      expect(calls.single, 'writer /o.mp4 8x8 24.0 null null hevc');
     });
 
     test('rejects videos smaller than 2x2', () {

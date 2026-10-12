@@ -26,6 +26,17 @@ enum ScaleFilter {
   area,
 }
 
+/// The video codec a writer encodes with.
+enum VideoCodec {
+  /// Plays everywhere.
+  h264,
+
+  /// About half the size of H.264 at the same quality; needs a device with
+  /// an HEVC encoder (writer creation fails otherwise) and a player that
+  /// supports it.
+  hevc,
+}
+
 class VideoInfoMessage {
   VideoInfoMessage({
     required this.width,
@@ -107,6 +118,7 @@ abstract class VideoWriterHostApi {
     double frameRate,
     int? bitRate,
     String? audioSourcePath,
+    VideoCodec codec,
   );
 
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)

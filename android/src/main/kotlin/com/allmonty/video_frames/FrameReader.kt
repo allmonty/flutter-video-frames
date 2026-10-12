@@ -1,8 +1,11 @@
 package com.allmonty.video_frames
 
 import android.media.MediaCodec
+import android.media.MediaCodecInfo.CodecProfileLevel
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.os.Build
 import java.nio.ByteBuffer
 
 /**
@@ -134,14 +137,22 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
             }
             extractor.selectTrack(track)
             val format = extractor.getTrackFormat(track)
-            val mime = format.getString(MediaFormat.KEY_MIME)!!
-            val codec = MediaCodec.createDecoderByType(mime)
+            val trackMime = format.getString(MediaFormat.KEY_MIME)!!
+            val mime = decodableMime(format)
+            val codec = createDecoder(format, mime)
             try {
                 // Rotation isn't passed on: the renderer applies it.
                 val config = MediaFormat.createVideoFormat(mime, format.getInteger(MediaFormat.KEY_WIDTH), format.getInteger(MediaFormat.KEY_HEIGHT))
-                for (key in listOf("csd-0", "csd-1", "csd-2")) {
+                // A Dolby Vision base layer only needs the HEVC/AVC parameter sets (csd-0).
+                val csd = if (mime == trackMime) listOf("csd-0", "csd-1", "csd-2") else listOf("csd-0")
+                for (key in csd) {
                     if (format.containsKey(key)) config.setByteBuffer(key, format.getByteBuffer(key))
                 }
+                if (Build.VERSION.SDK_INT >= 33) {
+                    // Ask for HDR (HLG/PQ) to be tone-mapped to SDR; decoders that can't ignore it.
+                    config.setInteger(MediaFormat.KEY_COLOR_TRANSFER_REQUEST, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+                }
+                // shortcut: below API 33 HDR input isn't tone-mapped (looks washed out); tone-map in the shader if users hit it.
                 codec.configure(config, renderer.surface, null, 0)
                 codec.start()
             } catch (e: Exception) {
@@ -234,6 +245,43 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
     }
 
     companion object {
+        /**
+         * Dolby Vision profiles 8 and 9 (iPhones record 8.4) carry an HEVC or
+         * AVC base layer that ordinary decoders play; use it when the device
+         * has no Dolby Vision decoder, which is common.
+         */
+        fun decodableMime(format: MediaFormat): String {
+            val mime = format.getString(MediaFormat.KEY_MIME)!!
+            if (mime != MediaFormat.MIMETYPE_VIDEO_DOLBY_VISION) return mime
+            if (MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format) != null) return mime
+            val profile = if (format.containsKey(MediaFormat.KEY_PROFILE)) format.getInteger(MediaFormat.KEY_PROFILE) else -1
+            return when (profile) {
+                CodecProfileLevel.DolbyVisionProfileDvheSt -> MediaFormat.MIMETYPE_VIDEO_HEVC
+                CodecProfileLevel.DolbyVisionProfileDvavSe -> MediaFormat.MIMETYPE_VIDEO_AVC
+                // Other profiles have no compatible base layer; creating the decoder fails with a clear error.
+                else -> mime
+            }
+        }
+
+        /**
+         * A decoder that supports the track's profile (e.g. 10-bit HEVC):
+         * the default decoder for a type may not, as on the emulator.
+         */
+        private fun createDecoder(track: MediaFormat, mime: String): MediaCodec {
+            val wanted = MediaFormat.createVideoFormat(mime, track.getInteger(MediaFormat.KEY_WIDTH), track.getInteger(MediaFormat.KEY_HEIGHT))
+            val profile = when {
+                // Dolby Vision profile 8's base layer is always 10-bit HEVC.
+                mime != track.getString(MediaFormat.KEY_MIME) && mime == MediaFormat.MIMETYPE_VIDEO_HEVC ->
+                    CodecProfileLevel.HEVCProfileMain10
+                mime != track.getString(MediaFormat.KEY_MIME) -> null
+                track.containsKey(MediaFormat.KEY_PROFILE) -> track.getInteger(MediaFormat.KEY_PROFILE)
+                else -> null
+            }
+            if (profile != null) wanted.setInteger(MediaFormat.KEY_PROFILE, profile)
+            val name = MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(wanted)
+            return if (name != null) MediaCodec.createByCodecName(name) else MediaCodec.createDecoderByType(mime)
+        }
+
         private const val TIMEOUT_US = 10_000L
         private const val END_OF_STREAM_GRACE_MS = 1_000L
         private const val STALL_MS = 5_000L

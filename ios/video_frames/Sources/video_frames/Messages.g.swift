@@ -197,6 +197,16 @@ enum ScaleFilter: Int, CaseIterable {
   case area = 2
 }
 
+/// The video codec a writer encodes with.
+enum VideoCodec: Int, CaseIterable {
+  /// Plays everywhere.
+  case h264 = 0
+  /// About half the size of H.264 at the same quality; needs a device with
+  /// an HEVC encoder (writer creation fails otherwise) and a player that
+  /// supports it.
+  case hevc = 1
+}
+
 /// Generated class from Pigeon that represents data sent in messages.
 struct VideoInfoMessage: Hashable, CustomStringConvertible {
   /// Frame size as delivered (after rotation and scaling).
@@ -327,8 +337,14 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
       }
       return nil
     case 130:
-      return VideoInfoMessage.fromList(self.readValue() as! [Any?])
+      let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
+      if let enumResultAsInt = enumResultAsInt {
+        return VideoCodec(rawValue: enumResultAsInt)
+      }
+      return nil
     case 131:
+      return VideoInfoMessage.fromList(self.readValue() as! [Any?])
+    case 132:
       return VideoFrameMessage.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
@@ -341,11 +357,14 @@ private class MessagesPigeonCodecWriter: FlutterStandardWriter {
     if let value = value as? ScaleFilter {
       super.writeByte(129)
       super.writeValue(value.rawValue)
-    } else if let value = value as? VideoInfoMessage {
+    } else if let value = value as? VideoCodec {
       super.writeByte(130)
+      super.writeValue(value.rawValue)
+    } else if let value = value as? VideoInfoMessage {
+      super.writeByte(131)
       super.writeValue(value.toList())
     } else if let value = value as? VideoFrameMessage {
-      super.writeByte(131)
+      super.writeByte(132)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -474,7 +493,7 @@ class VideoReaderHostApiSetup {
 protocol VideoWriterHostApi {
   /// Returns whether the audio of `audioSourcePath` will be copied; audio
   /// that can't go into an MP4 unchanged is dropped instead of failing.
-  func openWriter(writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?, audioSourcePath: String?) throws -> Bool
+  func openWriter(writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?, audioSourcePath: String?, codec: VideoCodec) throws -> Bool
   func addFrame(writerId: Int64, rgba: FlutterStandardTypedData, ptsUs: Int64) throws
   /// Flush, copy the audio track (if any) and close the file.
   func finishWriter(writerId: Int64) throws
@@ -508,8 +527,9 @@ class VideoWriterHostApiSetup {
         let frameRateArg = args[4] as! Double
         let bitRateArg: Int64? = nilOrValue(args[5])
         let audioSourcePathArg: String? = nilOrValue(args[6])
+        let codecArg = args[7] as! VideoCodec
         do {
-          let result = try api.openWriter(writerId: writerIdArg, path: pathArg, width: widthArg, height: heightArg, frameRate: frameRateArg, bitRate: bitRateArg, audioSourcePath: audioSourcePathArg)
+          let result = try api.openWriter(writerId: writerIdArg, path: pathArg, width: widthArg, height: heightArg, frameRate: frameRateArg, bitRate: bitRateArg, audioSourcePath: audioSourcePathArg, codec: codecArg)
           reply(wrapResult(result))
         } catch {
           reply(wrapError(error))

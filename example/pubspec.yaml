@@ -56,6 +56,7 @@ flutter:
   assets:
     - integration_test/assets/rotated90.mp4
     - integration_test/assets/colors709.mp4
+    - integration_test/assets/hlg.mp4
 
   # To add assets to your application, add an assets section, like this:
   # assets:
