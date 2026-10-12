@@ -9,6 +9,7 @@ jobs:
   # Dart, Kotlin unit tests and formatting.
   linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - id: flutter
@@ -39,6 +40,7 @@ jobs:
   # The Swift core against real AVFoundation, and the device tests natively on macOS.
   macos:
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - id: flutter
@@ -49,5 +51,7 @@ jobs:
           channel: stable
           cache: true
       - run: tool/apple_check.sh
+        timeout-minutes: 10
       - working-directory: example
         run: flutter test integration_test -d macos
+        timeout-minutes: 20
