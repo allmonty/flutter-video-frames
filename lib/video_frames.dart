@@ -162,7 +162,9 @@ class VideoReader {
   final VideoInfo info;
   bool _closed = false;
 
-  /// Open `path`. With `maxDimension`, frames are scaled down (keeping the
+  /// Open the video file at `path`: a file path, not a `content://` or
+  /// `file://` URI (pickers such as `file_picker` return copied file paths).
+  /// With `maxDimension`, frames are scaled down (keeping the
   /// aspect ratio) so neither edge exceeds it, using `filter`: the default
   /// [ScaleFilter.nearest] suits pixel art, [ScaleFilter.bilinear] small
   /// downscales and [ScaleFilter.area] large ones. Applies to [nextFrame]
@@ -259,8 +261,9 @@ class VideoWriter {
   final bool includesAudio;
   bool _done = false;
 
-  /// Create `path` (overwritten if it exists). With `audioSourcePath`, that
-  /// file's audio track is copied into the output when [finish] is called.
+  /// Create `path` (overwritten if it exists). With `audioSourcePath` (a
+  /// file path, like [VideoReader.open]'s), that file's audio track is
+  /// copied into the output when [finish] is called.
   /// [VideoCodec.hevc] makes smaller files but fails on devices without an
   /// HEVC encoder; fall back to [VideoCodec.h264] when it throws.
   static Future<VideoWriter> create(

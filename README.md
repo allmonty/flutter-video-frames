@@ -79,6 +79,9 @@ try {
 final still = await reader.frameAt(const Duration(seconds: 3));
 ```
 
+Paths are file paths, not `content://` URIs. File pickers such as
+`file_picker` and `image_picker` already return copied file paths.
+
 `maxDimension` scales frames down; pick how with `filter`:
 `ScaleFilter.nearest` (default, sharp, for pixel art), `ScaleFilter.bilinear`
 (smooth for small downscales) or `ScaleFilter.area` (averages every covered

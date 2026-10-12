@@ -36,6 +36,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
     init {
         val extractor = MediaExtractor()
         try {
+            // shortcut: content:// URIs unsupported on Android; add a Context + Uri overload if users ask.
             extractor.setDataSource(path)
             var video: MediaFormat? = null
             var audio: MediaFormat? = null
