@@ -58,6 +58,11 @@ class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi 
         return VideoFrameMessage(pts, reader.width.toLong(), reader.height.toLong(), rgba)
     }
 
+    override fun seek(readerId: Long, timeUs: Long) {
+        val reader = reader(readerId)
+        coded("readFailed") { reader.seek(timeUs) }
+    }
+
     override fun closeReader(readerId: Long) {
         synchronized(this) { readers.remove(readerId) }?.close()
     }

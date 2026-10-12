@@ -399,6 +399,25 @@ class VideoReaderHostApi {
     return pigeonVar_replyValue! as VideoFrameMessage;
   }
 
+  /// Moves the sequential position: the next [nextFrame] returns the first
+  /// frame at or after `timeUs`. Doesn't affect [frameAt].
+  Future<void> seek(int readerId, int timeUs) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.VideoReaderHostApi.seek$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[
+      readerId,
+      timeUs,
+    ]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
+  }
+
   Future<void> closeReader(int readerId) async {
     final pigeonVar_channelName =
         'dev.flutter.pigeon.video_frames.VideoReaderHostApi.closeReader$pigeonVar_messageChannelSuffix';

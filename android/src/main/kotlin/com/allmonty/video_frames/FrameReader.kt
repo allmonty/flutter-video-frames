@@ -21,6 +21,9 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
     private var sequential: Decoder? = null
     private var seeker: Decoder? = null
 
+    /** After a [seek], [next] skips (without converting) frames before this. */
+    private var minNextPtsUs = Long.MIN_VALUE
+
     val srcWidth: Int
     val srcHeight: Int
     val rotation: Int
@@ -75,7 +78,19 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
     /** The next frame in presentation order, or null at the end. */
     fun next(): Pair<Long, ByteArray>? {
         val decoder = sequential ?: Decoder().also { sequential = it }
-        return decoder.nextAtOrAfter(Long.MIN_VALUE)
+        return decoder.nextAtOrAfter(minNextPtsUs).also { minNextPtsUs = Long.MIN_VALUE }
+    }
+
+    /**
+     * Move [next]'s position: it returns the first frame at or after
+     * `timeUs` (null past the end). Decoding restarts at the previous sync
+     * frame; frames before `timeUs` are dropped unconverted. Doesn't affect
+     * [frameAt].
+     */
+    fun seek(timeUs: Long) {
+        val decoder = sequential ?: Decoder().also { sequential = it }
+        decoder.seek(timeUs)
+        minNextPtsUs = timeUs
     }
 
     /**

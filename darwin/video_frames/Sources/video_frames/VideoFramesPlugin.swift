@@ -112,6 +112,12 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
     }
   }
 
+  func seek(readerId: Int64, timeUs: Int64) throws {
+    try bridged("readFailed") {
+      try self.reader(readerId).seek(toUs: timeUs)
+    }
+  }
+
   func closeReader(readerId: Int64) throws {
     lock.lock()
     let reader = readers.removeValue(forKey: readerId)

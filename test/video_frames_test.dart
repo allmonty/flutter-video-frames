@@ -44,6 +44,13 @@ class FakeReaderApi extends VideoReaderHostApi {
       VideoFrameMessage(ptsUs: timeUs, width: 4, height: 2, rgba: Uint8List(32));
 
   @override
+  Future<void> seek(int readerId, int timeUs) async {
+    calls.add('seek $readerId $timeUs');
+    // Like the platform: the next frame is the first at or after timeUs.
+    frames[readerId]!.removeWhere((f) => f.ptsUs < timeUs);
+  }
+
+  @override
   Future<void> closeReader(int readerId) async => calls.add('close $readerId');
 }
 
@@ -147,6 +154,29 @@ void main() {
       expect(f.rgba, hasLength(32));
     });
 
+    test('seek passes microseconds and moves nextFrame', () async {
+      final reader = await VideoReader.open('/v.mp4');
+      await reader.seek(const Duration(milliseconds: 40));
+      expect(calls.last, startsWith('seek '));
+      expect(calls.last, endsWith(' 40000'));
+      expect((await reader.nextFrame())!.pts, const Duration(milliseconds: 40));
+    });
+
+    test('seek errors carry the platform code', () async {
+      VideoFrames.readerApi = _FailingSeekApi(calls);
+      final reader = await VideoReader.open('/v.mp4');
+      expect(
+        () => reader.seek(Duration.zero),
+        throwsA(
+          isA<VideoFramesException>().having(
+            (e) => e.code,
+            'code',
+            VideoFramesErrorCode.readFailed,
+          ),
+        ),
+      );
+    });
+
     test('close is idempotent and blocks further reads', () async {
       final reader = await VideoReader.open('/v.mp4');
       await reader.close();
@@ -154,6 +184,7 @@ void main() {
       expect(calls.where((c) => c.startsWith('close')), hasLength(1));
       expect(reader.nextFrame, throwsStateError);
       expect(() => reader.frameAt(Duration.zero), throwsStateError);
+      expect(() => reader.seek(Duration.zero), throwsStateError);
     });
 
     test('readers get distinct ids', () async {
@@ -281,4 +312,12 @@ void main() {
       );
     });
   });
+}
+
+class _FailingSeekApi extends FakeReaderApi {
+  _FailingSeekApi(super.calls);
+
+  @override
+  Future<void> seek(int readerId, int timeUs) async =>
+      throw PlatformException(code: 'readFailed', message: 'boom');
 }

@@ -396,6 +396,9 @@ protocol VideoReaderHostApi {
   /// The frame closest to `timeUs`, for scrubbing. Doesn't move the
   /// sequential position used by [nextFrame].
   func frameAt(readerId: Int64, timeUs: Int64) throws -> VideoFrameMessage
+  /// Moves the sequential position: the next [nextFrame] returns the first
+  /// frame at or after `timeUs`. Doesn't affect [frameAt].
+  func seek(readerId: Int64, timeUs: Int64) throws
   func closeReader(readerId: Int64) throws
 }
 
@@ -467,6 +470,26 @@ class VideoReaderHostApiSetup {
       }
     } else {
       frameAtChannel.setMessageHandler(nil)
+    }
+    /// Moves the sequential position: the next [nextFrame] returns the first
+    /// frame at or after `timeUs`. Doesn't affect [frameAt].
+    let seekChannel = taskQueue == nil
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.seek\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.seek\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+    if let api = api {
+      seekChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let readerIdArg = args[0] as! Int64
+        let timeUsArg = args[1] as! Int64
+        do {
+          try api.seek(readerId: readerIdArg, timeUs: timeUsArg)
+          reply(wrapResult(nil))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      seekChannel.setMessageHandler(nil)
     }
     let closeReaderChannel = taskQueue == nil
       ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.closeReader\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)

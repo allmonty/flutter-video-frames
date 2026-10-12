@@ -99,6 +99,11 @@ abstract class VideoReaderHostApi {
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
   VideoFrameMessage frameAt(int readerId, int timeUs);
 
+  /// Moves the sequential position: the next [nextFrame] returns the first
+  /// frame at or after `timeUs`. Doesn't affect [frameAt].
+  @TaskQueue(type: TaskQueueType.serialBackgroundThread)
+  void seek(int readerId, int timeUs);
+
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
   void closeReader(int readerId);
 }

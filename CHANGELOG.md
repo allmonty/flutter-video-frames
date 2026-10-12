@@ -1,3 +1,11 @@
+## 1.1.0
+
+- `VideoReader.seek(time)` moves `nextFrame()`'s position: the next frame is
+  the first at or after `time`. Decoding restarts at the previous sync frame
+  and skips the frames before `time` without converting them, so playback
+  from the middle of a video no longer decodes everything before it.
+  `frameAt` is unaffected.
+
 ## 1.0.0
 
 First release on pub.dev.
