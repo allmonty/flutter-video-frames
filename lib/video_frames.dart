@@ -8,19 +8,15 @@ library;
 
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'src/messages.g.dart';
 
-export 'src/messages.g.dart'
-    show
-        ScaleFilter,
-        VideoCodec,
-        VideoFrameMessage,
-        VideoInfoMessage,
-        VideoReaderHostApi,
-        VideoWriterHostApi;
+export 'src/messages.g.dart' show ScaleFilter, VideoCodec;
 
 /// Metadata of an opened video.
 class VideoInfo {
+  /// Metadata as reported by [VideoReader.open].
   const VideoInfo({
     required this.width,
     required this.height,
@@ -31,14 +27,22 @@ class VideoInfo {
     this.audioCompatible = false,
   });
 
-  /// Size of the delivered frames (after rotation and any scaling).
+  /// Width of the delivered frames (after rotation and any scaling).
   final int width;
+
+  /// Height of the delivered frames (after rotation and any scaling).
   final int height;
+
+  /// Length of the video track.
   final Duration duration;
+
+  /// Nominal frames per second (30 when the file doesn't say).
   final double frameRate;
 
   /// The file's rotation metadata; frames are already upright.
   final int rotationDegrees;
+
+  /// Whether the file has an audio track.
   final bool hasAudio;
 
   /// The audio can be copied into an MP4 unchanged. When [hasAudio] is true
@@ -52,6 +56,7 @@ class VideoInfo {
 
 /// One decoded frame: row-major RGBA, `width * height * 4` bytes.
 class VideoFrame {
+  /// A frame shown at `pts`.
   const VideoFrame({
     required this.pts,
     required this.width,
@@ -59,19 +64,29 @@ class VideoFrame {
     required this.rgba,
   });
 
+  /// Presentation time: when the frame is shown.
   final Duration pts;
+
+  /// Width in pixels.
   final int width;
+
+  /// Height in pixels.
   final int height;
+
+  /// Row-major RGBA pixels, `width * height * 4` bytes, opaque alpha.
   final Uint8List rgba;
 }
 
 /// Entry point: holds the host API (swappable in tests).
 abstract final class VideoFrames {
-  /// The platform decoding API; replace it with a fake in tests.
+  /// The platform decoding API; replace it with a fake in tests (see
+  /// `package:video_frames/testing.dart`).
+  @visibleForTesting
   static VideoReaderHostApi readerApi = VideoReaderHostApi();
 
   /// The platform encoding API (a separate queue from [readerApi], so
   /// decoding and encoding can overlap); replace it with a fake in tests.
+  @visibleForTesting
   static VideoWriterHostApi writerApi = VideoWriterHostApi();
   static int _nextId = 1;
 
@@ -90,6 +105,8 @@ class VideoReader {
   static final _finalizer = Finalizer<int>((id) => VideoFrames.readerApi.closeReader(id).ignore());
 
   final int _id;
+
+  /// The video's size, length, frame rate, rotation and audio.
   final VideoInfo info;
   bool _closed = false;
 
@@ -133,6 +150,8 @@ class VideoReader {
     return _frame(await VideoFrames.readerApi.frameAt(_id, time.inMicroseconds));
   }
 
+  /// Release the decoders. Calling it again does nothing; reading after it
+  /// throws a [StateError].
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
@@ -172,9 +191,12 @@ class VideoWriter {
 
   final int _id;
 
-  /// Encoded size: the requested size rounded down to even numbers (H.264
-  /// needs even dimensions). Frames of the requested size are cropped.
+  /// Encoded width: the requested width rounded down to an even number
+  /// (H.264 and HEVC need even dimensions). Frames of the requested size are
+  /// cropped.
   final int width;
+
+  /// Encoded height, rounded down to an even number like [width].
   final int height;
   final int _requestedWidth;
   final int _requestedHeight;
@@ -221,6 +243,8 @@ class VideoWriter {
     return VideoFrames.writerApi.addFrame(_id, _fit(rgba), pts.inMicroseconds);
   }
 
+  /// Flush the encoder, copy the audio track (if any) and close the file.
+  /// If it fails, the encoder is freed and the partial file deleted.
   Future<void> finish() {
     _checkOpen();
     _done = true;

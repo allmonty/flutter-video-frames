@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:video_frames/video_frames.dart';
+import 'package:video_frames/testing.dart';
 
 /// In-memory stand-in for the platform's decoding side.
 class FakeReaderApi extends VideoReaderHostApi {

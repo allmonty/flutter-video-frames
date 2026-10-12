@@ -10,9 +10,9 @@ import 'package:flutter/services.dart';
 import 'package:meta/meta.dart' show immutable, protected, visibleForTesting;
 
 Object? _extractReplyValueOrThrow(
-    List<Object?>? replyList,
-    String channelName, {
-    required bool isNullValid,
+  List<Object?>? replyList,
+  String channelName, {
+  required bool isNullValid,
 }) {
   if (replyList == null) {
     throw PlatformException(
@@ -46,8 +46,7 @@ bool _deepEquals(Object? a, Object? b) {
   }
   if (a is List && b is List) {
     return a.length == b.length &&
-        a.indexed
-            .every(((int, dynamic) item) => _deepEquals(item.$2, b[item.$1]));
+        a.indexed.every(((int, dynamic) item) => _deepEquals(item.$2, b[item.$1]));
   }
   if (a is Map && b is Map) {
     if (a.length != b.length) {
@@ -96,15 +95,16 @@ int _deepHash(Object? value) {
   return value.hashCode;
 }
 
-
 /// How frames are filtered when `maxDimension` scales them down.
 enum ScaleFilter {
   /// Pick the source pixel at each output pixel's center: sharp, keeps hard
   /// edges (pixel art), but aliases on photos.
   nearest,
+
   /// Blend the 2x2 source pixels around each output pixel's center: smooth
   /// for downscales up to about 2x; larger ones alias again.
   bilinear,
+
   /// Average every source pixel an output pixel covers: smooth at any
   /// downscale (e.g. 4K to 720p).
   area,
@@ -114,6 +114,7 @@ enum ScaleFilter {
 enum VideoCodec {
   /// Plays everywhere.
   h264,
+
   /// About half the size of H.264 at the same quality; needs a device with
   /// an HEVC encoder (writer creation fails otherwise) and a player that
   /// supports it.
@@ -162,7 +163,8 @@ class VideoInfoMessage {
   }
 
   Object encode() {
-    return _toList();  }
+    return _toList();
+  }
 
   static VideoInfoMessage decode(Object result) {
     result as List<Object?>;
@@ -186,7 +188,13 @@ class VideoInfoMessage {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(width, other.width) && _deepEquals(height, other.height) && _deepEquals(durationUs, other.durationUs) && _deepEquals(frameRate, other.frameRate) && _deepEquals(rotationDegrees, other.rotationDegrees) && _deepEquals(hasAudio, other.hasAudio) && _deepEquals(audioCompatible, other.audioCompatible);
+    return _deepEquals(width, other.width) &&
+        _deepEquals(height, other.height) &&
+        _deepEquals(durationUs, other.durationUs) &&
+        _deepEquals(frameRate, other.frameRate) &&
+        _deepEquals(rotationDegrees, other.rotationDegrees) &&
+        _deepEquals(hasAudio, other.hasAudio) &&
+        _deepEquals(audioCompatible, other.audioCompatible);
   }
 
   @override
@@ -217,16 +225,12 @@ class VideoFrameMessage {
   Uint8List rgba;
 
   List<Object?> _toList() {
-    return <Object?>[
-      ptsUs,
-      width,
-      height,
-      rgba,
-    ];
+    return <Object?>[ptsUs, width, height, rgba];
   }
 
   Object encode() {
-    return _toList();  }
+    return _toList();
+  }
 
   static VideoFrameMessage decode(Object result) {
     result as List<Object?>;
@@ -247,7 +251,10 @@ class VideoFrameMessage {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(ptsUs, other.ptsUs) && _deepEquals(width, other.width) && _deepEquals(height, other.height) && _deepEquals(rgba, other.rgba);
+    return _deepEquals(ptsUs, other.ptsUs) &&
+        _deepEquals(width, other.width) &&
+        _deepEquals(height, other.height) &&
+        _deepEquals(rgba, other.rgba);
   }
 
   @override
@@ -260,7 +267,6 @@ class VideoFrameMessage {
   }
 }
 
-
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
   @override
@@ -268,16 +274,16 @@ class _PigeonCodec extends StandardMessageCodec {
     if (value is int) {
       buffer.putUint8(4);
       buffer.putInt64(value);
-    }    else if (value is ScaleFilter) {
+    } else if (value is ScaleFilter) {
       buffer.putUint8(129);
       writeValue(buffer, value.index);
-    }    else if (value is VideoCodec) {
+    } else if (value is VideoCodec) {
       buffer.putUint8(130);
       writeValue(buffer, value.index);
-    }    else if (value is VideoInfoMessage) {
+    } else if (value is VideoInfoMessage) {
       buffer.putUint8(131);
       writeValue(buffer, value.encode());
-    }    else if (value is VideoFrameMessage) {
+    } else if (value is VideoFrameMessage) {
       buffer.putUint8(132);
       writeValue(buffer, value.encode());
     } else {
@@ -310,36 +316,49 @@ class VideoReaderHostApi {
   /// available for dependency injection. If it is left null, the default
   /// BinaryMessenger will be used which routes to the host platform.
   VideoReaderHostApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
-      : pigeonVar_binaryMessenger = binaryMessenger,
-        pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+    : pigeonVar_binaryMessenger = binaryMessenger,
+      pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty
+          ? '.$messageChannelSuffix'
+          : '';
   final BinaryMessenger? pigeonVar_binaryMessenger;
 
   static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
 
   final String pigeonVar_messageChannelSuffix;
 
-  Future<VideoInfoMessage> openReader(int readerId, String path, int? maxDimension, ScaleFilter filter) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.video_frames.VideoReaderHostApi.openReader$pigeonVar_messageChannelSuffix';
+  Future<VideoInfoMessage> openReader(
+    int readerId,
+    String path,
+    int? maxDimension,
+    ScaleFilter filter,
+  ) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.VideoReaderHostApi.openReader$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[readerId, path, maxDimension, filter]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[
+      readerId,
+      path,
+      maxDimension,
+      filter,
+    ]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: false,
-    )
-    ;
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
     return pigeonVar_replyValue! as VideoInfoMessage;
   }
 
   /// The next frame in presentation order, or null at the end.
   Future<VideoFrameMessage?> nextFrame(int readerId) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.video_frames.VideoReaderHostApi.nextFrame$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.VideoReaderHostApi.nextFrame$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -349,37 +368,40 @@ class VideoReaderHostApi {
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: true,
-    )
-    ;
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: true,
+    );
     return pigeonVar_replyValue as VideoFrameMessage?;
   }
 
   /// The frame closest to `timeUs`, for scrubbing. Doesn't move the
   /// sequential position used by [nextFrame].
   Future<VideoFrameMessage> frameAt(int readerId, int timeUs) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.video_frames.VideoReaderHostApi.frameAt$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.VideoReaderHostApi.frameAt$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[readerId, timeUs]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[
+      readerId,
+      timeUs,
+    ]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: false,
-    )
-    ;
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
     return pigeonVar_replyValue! as VideoFrameMessage;
   }
 
   Future<void> closeReader(int readerId) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.video_frames.VideoReaderHostApi.closeReader$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.VideoReaderHostApi.closeReader$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -388,12 +410,7 @@ class VideoReaderHostApi {
     final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[readerId]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
-    _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: true,
-    )
-    ;
+    _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
   }
 }
 
@@ -403,8 +420,10 @@ class VideoWriterHostApi {
   /// available for dependency injection. If it is left null, the default
   /// BinaryMessenger will be used which routes to the host platform.
   VideoWriterHostApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
-      : pigeonVar_binaryMessenger = binaryMessenger,
-        pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+    : pigeonVar_binaryMessenger = binaryMessenger,
+      pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty
+          ? '.$messageChannelSuffix'
+          : '';
   final BinaryMessenger? pigeonVar_binaryMessenger;
 
   static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
@@ -413,46 +432,65 @@ class VideoWriterHostApi {
 
   /// Returns whether the audio of `audioSourcePath` will be copied; audio
   /// that can't go into an MP4 unchanged is dropped instead of failing.
-  Future<bool> openWriter(int writerId, String path, int width, int height, double frameRate, int? bitRate, String? audioSourcePath, VideoCodec codec) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.video_frames.VideoWriterHostApi.openWriter$pigeonVar_messageChannelSuffix';
+  Future<bool> openWriter(
+    int writerId,
+    String path,
+    int width,
+    int height,
+    double frameRate,
+    int? bitRate,
+    String? audioSourcePath,
+    VideoCodec codec,
+  ) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.VideoWriterHostApi.openWriter$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[writerId, path, width, height, frameRate, bitRate, audioSourcePath, codec]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[
+      writerId,
+      path,
+      width,
+      height,
+      frameRate,
+      bitRate,
+      audioSourcePath,
+      codec,
+    ]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: false,
-    )
-    ;
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
     return pigeonVar_replyValue! as bool;
   }
 
   Future<void> addFrame(int writerId, Uint8List rgba, int ptsUs) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.video_frames.VideoWriterHostApi.addFrame$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.VideoWriterHostApi.addFrame$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[writerId, rgba, ptsUs]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[
+      writerId,
+      rgba,
+      ptsUs,
+    ]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
-    _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: true,
-    )
-    ;
+    _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
   }
 
   /// Flush, copy the audio track (if any) and close the file.
   Future<void> finishWriter(int writerId) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.video_frames.VideoWriterHostApi.finishWriter$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.VideoWriterHostApi.finishWriter$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -461,17 +499,13 @@ class VideoWriterHostApi {
     final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[writerId]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
-    _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: true,
-    )
-    ;
+    _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
   }
 
   /// Stop and delete the partial file.
   Future<void> cancelWriter(int writerId) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.video_frames.VideoWriterHostApi.cancelWriter$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.VideoWriterHostApi.cancelWriter$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -480,11 +514,6 @@ class VideoWriterHostApi {
     final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[writerId]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
-    _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: true,
-    )
-    ;
+    _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
   }
 }

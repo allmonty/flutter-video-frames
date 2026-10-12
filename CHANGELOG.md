@@ -49,6 +49,11 @@
   until one starts, ending with Android's software codecs. Vendor codecs can
   claim a format and still fail to start (Qualcomm's H.264 encoder at 64x64
   and 256x64); those sizes now fall back instead of failing.
+- **Breaking:** the generated host API and message types
+  (`VideoReaderHostApi`, `VideoWriterHostApi`, `VideoFrameMessage`,
+  `VideoInfoMessage`) moved from `package:video_frames/video_frames.dart` to
+  `package:video_frames/testing.dart`, and `VideoFrames.readerApi` /
+  `writerApi` are `@visibleForTesting`. Every public member is documented.
 
 ## 0.3.0
 
