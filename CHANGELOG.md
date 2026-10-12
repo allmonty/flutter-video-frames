@@ -1,3 +1,9 @@
+## Unreleased
+
+- A writer whose `finish()` fails now frees the encoder and deletes the broken
+  file (Android leaked the hardware encoder; both platforms left the file).
+  An Android writer that fails while being created no longer leaks it either.
+
 ## 0.3.0
 
 - Swift Package Manager support. The iOS sources moved to

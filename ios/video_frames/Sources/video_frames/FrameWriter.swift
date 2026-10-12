@@ -100,27 +100,33 @@ final class FrameWriter {
   }
 
   func finish() throws {
-    videoInput.markAsFinished()
-    if let input = audioInput, let reader = audioReader, let output = audioOutput {
-      if reader.startReading() {
-        while let sample = output.copyNextSampleBuffer() {
-          try waitUntilReady(input)
-          if !input.append(sample) { break }
+    do {
+      videoInput.markAsFinished()
+      if let input = audioInput, let reader = audioReader, let output = audioOutput {
+        if reader.startReading() {
+          while let sample = output.copyNextSampleBuffer() {
+            try waitUntilReady(input)
+            if !input.append(sample) { break }
+          }
         }
+        input.markAsFinished()
       }
-      input.markAsFinished()
-    }
-    let done = DispatchSemaphore(value: 0)
-    writer.finishWriting { done.signal() }
-    done.wait()
-    if writer.status != .completed {
-      throw VideoFramesError.writeFailed(writer.error?.localizedDescription ?? "finish failed")
+      let done = DispatchSemaphore(value: 0)
+      writer.finishWriting { done.signal() }
+      done.wait()
+      if writer.status != .completed {
+        throw VideoFramesError.writeFailed(writer.error?.localizedDescription ?? "finish failed")
+      }
+    } catch {
+      // Don't leave a broken file behind.
+      cancel()
+      throw error
     }
   }
 
   func cancel() {
     audioReader?.cancelReading()
-    writer.cancelWriting()
+    if writer.status == .writing { writer.cancelWriting() }
     try? FileManager.default.removeItem(at: url)
   }
 

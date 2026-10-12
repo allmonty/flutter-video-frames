@@ -21,8 +21,17 @@ class FrameWriter(
     bitRate: Int?,
     audioSourcePath: String?,
 ) {
+    init {
+        require(width % 2 == 0 && height % 2 == 0) { "size must be even, got ${width}x$height" }
+    }
+
     private val codec: MediaCodec = MediaCodec.createEncoderByType(MIME)
-    private val muxer = MediaMuxer(path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+    private val muxer = try {
+        MediaMuxer(path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+    } catch (e: Exception) {
+        codec.release()
+        throw e
+    }
     private val info = MediaCodec.BufferInfo()
     private var videoTrack = -1
     private var muxerStarted = false
@@ -35,17 +44,21 @@ class FrameWriter(
         get() = audioExtractor != null
 
     init {
-        require(width % 2 == 0 && height % 2 == 0) { "size must be even, got ${width}x$height" }
-        val format = MediaFormat.createVideoFormat(MIME, width, height).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-            setInteger(MediaFormat.KEY_BIT_RATE, bitRate ?: defaultBitRate(width, height, frameRate))
-            setFloat(MediaFormat.KEY_FRAME_RATE, frameRate.toFloat())
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-        }
-        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        codec.start()
+        try {
+            val format = MediaFormat.createVideoFormat(MIME, width, height).apply {
+                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+                setInteger(MediaFormat.KEY_BIT_RATE, bitRate ?: defaultBitRate(width, height, frameRate))
+                setFloat(MediaFormat.KEY_FRAME_RATE, frameRate.toFloat())
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            }
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            codec.start()
 
-        if (audioSourcePath != null) openAudio(audioSourcePath)
+            if (audioSourcePath != null) openAudio(audioSourcePath)
+        } catch (e: Exception) {
+            cancel()
+            throw e
+        }
     }
 
     /**
@@ -93,14 +106,20 @@ class FrameWriter(
     }
 
     fun finish() {
-        var index: Int
-        do {
-            index = codec.dequeueInputBuffer(TIMEOUT_US)
-            if (index < 0) drain(false)
-        } while (index < 0)
-        codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-        drain(true)
-        copyAudio()
+        try {
+            var index: Int
+            do {
+                index = codec.dequeueInputBuffer(TIMEOUT_US)
+                if (index < 0) drain(false)
+            } while (index < 0)
+            codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            drain(true)
+            copyAudio()
+        } catch (e: Exception) {
+            // The plugin has already forgotten this writer: free the codec and drop the broken file.
+            cancel()
+            throw e
+        }
         release()
     }
 
