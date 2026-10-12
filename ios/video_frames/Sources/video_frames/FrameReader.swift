@@ -28,6 +28,7 @@ enum AudioSupport {
   /// A passthrough input for `track`, added to `writer` when given; nil if an
   /// MP4 writer won't accept it.
   static func passthroughInput(for track: AVAssetTrack, into writer: AVAssetWriter?) -> AVAssetWriterInput? {
+    // A CF cast can't fail: formatDescriptions only holds CMFormatDescriptions.
     let hint = track.formatDescriptions.first.map { $0 as! CMFormatDescription }
     let input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: hint)
     input.expectsMediaDataInRealTime = false
@@ -107,7 +108,7 @@ final class FrameReader {
     while let sample = output.copyNextSampleBuffer() {
       guard let pixels = CMSampleBufferGetImageBuffer(sample) else { continue }
       let pts = CMSampleBufferGetPresentationTimeStamp(sample)
-      return (Int64(CMTimeGetSeconds(pts) * 1_000_000), convert(pixels))
+      return (Int64(CMTimeGetSeconds(pts) * 1_000_000), try convert(pixels))
     }
     if reader.status == .failed {
       throw VideoFramesError.readFailed(reader.error?.localizedDescription ?? "unknown error")
@@ -141,12 +142,14 @@ final class FrameReader {
     reader.cancelReading()
   }
 
-  private func convert(_ pixels: CVPixelBuffer) -> [UInt8] {
+  private func convert(_ pixels: CVPixelBuffer) throws -> [UInt8] {
     CVPixelBufferLockBaseAddress(pixels, .readOnly)
     defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
-    let base = CVPixelBufferGetBaseAddress(pixels)!.assumingMemoryBound(to: UInt8.self)
+    guard let base = CVPixelBufferGetBaseAddress(pixels) else {
+      throw VideoFramesError.readFailed("frame has no pixel data")
+    }
     return PixelConversion.bgraToRgba(
-      base,
+      base.assumingMemoryBound(to: UInt8.self),
       srcWidth: CVPixelBufferGetWidth(pixels),
       srcHeight: CVPixelBufferGetHeight(pixels),
       bytesPerRow: CVPixelBufferGetBytesPerRow(pixels),

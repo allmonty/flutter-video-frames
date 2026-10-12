@@ -82,18 +82,22 @@ final class FrameWriter {
       throw VideoFramesError.writeFailed(writer.error?.localizedDescription ?? "no pixel buffer pool")
     }
     var buffer: CVPixelBuffer?
-    CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
-    guard let pixels = buffer else { throw VideoFramesError.writeFailed("cannot allocate pixel buffer") }
+    guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer) == kCVReturnSuccess, let pixels = buffer
+    else { throw VideoFramesError.writeFailed("cannot allocate pixel buffer") }
     CVPixelBufferLockBaseAddress(pixels, [])
+    defer { CVPixelBufferUnlockBaseAddress(pixels, []) }
+    guard let dst = CVPixelBufferGetBaseAddress(pixels) else {
+      throw VideoFramesError.writeFailed("pixel buffer has no memory")
+    }
     rgba.withUnsafeBytes { src in
+      // Non-empty: the size check above needs at least one pixel.
       PixelConversion.rgbaToBgra(
         src.bindMemory(to: UInt8.self).baseAddress!,
         width: width,
         height: height,
-        into: CVPixelBufferGetBaseAddress(pixels)!.assumingMemoryBound(to: UInt8.self),
+        into: dst.assumingMemoryBound(to: UInt8.self),
         bytesPerRow: CVPixelBufferGetBytesPerRow(pixels))
     }
-    CVPixelBufferUnlockBaseAddress(pixels, [])
     if !adaptor.append(pixels, withPresentationTime: CMTime(value: ptsUs, timescale: 1_000_000)) {
       throw VideoFramesError.writeFailed(writer.error?.localizedDescription ?? "append failed")
     }

@@ -5,6 +5,8 @@
   An Android writer that fails while being created no longer leaks it either.
 - Android: a stuck encoder now fails with "video encoder stalled" after 5
   seconds instead of hanging `addFrame` or `finish` forever.
+- iOS: a frame whose pixel memory can't be read or allocated now returns an
+  error to Dart instead of crashing the app.
 
 ## 0.3.0
 
