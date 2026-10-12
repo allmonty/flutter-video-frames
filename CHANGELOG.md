@@ -41,6 +41,10 @@
 - Android: a decoder that fails mid-stream now reports which codec and video
   it was ("c2.x.hevc.decoder (video/hevc 640x360) can't decode this video")
   instead of only "Invalid to call at Released state".
+- Android: the HDR-to-SDR tone-mapping request is only sent for HDR video.
+  On SDR video it made Qualcomm decoders fail ("not a supported pixel
+  format"), so videos the plugin itself wrote couldn't be read on those
+  phones.
 
 ## 0.3.0
 

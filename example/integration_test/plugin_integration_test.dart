@@ -208,7 +208,10 @@ void main() {
       isTrue,
       reason: 'gray stays neutral: $r $g $b',
     );
-    expect(g > 60 && g < 200, isTrue, reason: 'gray stays mid-range: $g');
+    // How bright HDR comes out in SDR is up to the platform's tone mapper (the
+    // SDR gray 128 reads ~114 on Apple, ~55 on a Snapdragon 8 Gen 3); it must
+    // just not collapse to black or blow out.
+    expect(g > 30 && g < 220, isTrue, reason: 'gray is neither black nor blown out: $g');
     expectPixel(viaSeek, 480, 270, (r, g, b), 'frameAt matches nextFrame', 12);
   });
 

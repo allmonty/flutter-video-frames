@@ -154,8 +154,9 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
                 for (key in csd) {
                     if (format.containsKey(key)) config.setByteBuffer(key, format.getByteBuffer(key))
                 }
-                if (Build.VERSION.SDK_INT >= 33) {
-                    // Ask for HDR (HLG/PQ) to be tone-mapped to SDR; decoders that can't ignore it.
+                if (Build.VERSION.SDK_INT >= 33 && isHdr(format)) {
+                    // Ask for HDR to be tone-mapped to SDR. Only for HDR: on SDR video
+                    // Qualcomm decoders fail with this request ("not a supported pixel format").
                     config.setInteger(MediaFormat.KEY_COLOR_TRANSFER_REQUEST, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
                 }
                 // shortcut: below API 33 HDR input isn't tone-mapped (looks washed out); tone-map in the shader if users hit it.
@@ -274,6 +275,14 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
                 // Other profiles have no compatible base layer; creating the decoder fails with a clear error.
                 else -> mime
             }
+        }
+
+        /** HLG or PQ transfer, or Dolby Vision (which may carry no color keys). */
+        private fun isHdr(track: MediaFormat): Boolean {
+            if (track.getString(MediaFormat.KEY_MIME) == MediaFormat.MIMETYPE_VIDEO_DOLBY_VISION) return true
+            if (!track.containsKey(MediaFormat.KEY_COLOR_TRANSFER)) return false
+            val transfer = track.getInteger(MediaFormat.KEY_COLOR_TRANSFER)
+            return transfer == MediaFormat.COLOR_TRANSFER_HLG || transfer == MediaFormat.COLOR_TRANSFER_ST2084
         }
 
         /**
