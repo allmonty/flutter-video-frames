@@ -1,7 +1,30 @@
 # video_frames
 
-A small Flutter plugin for Android and iOS that reads video files and writes
-MP4s. There's no FFmpeg; it uses the platform codecs.
+A small Flutter plugin that takes a video apart into still pictures, and puts
+pictures back together into a video.
+
+**In plain terms:** a video is a fast series of photos. This package lets an
+app open a video, get each photo (frame) out of it, change those photos
+however it likes (filters, effects, drawing on them), and save the result as
+a new video, keeping the original sound. It can also jump to a single moment,
+for example to show a preview while the user drags a slider.
+
+**Why it exists:** to apply filters to videos. It was built so an app could
+run its own image filters on every frame of a video and export the filtered
+result, without bundling a heavy video library like FFmpeg.
+
+**Technically:** it decodes video files to RGBA frames and encodes RGBA frames
+to H.264 in an MP4, using the phone's own hardware/system codecs (no FFmpeg).
+
+## Platforms
+
+| Platform | Supported | Minimum version |
+|---|---|---|
+| Android | ✅ | Android 7.0 (API 24) |
+| iOS | ✅ | iOS 15 |
+| Web, macOS, Windows, Linux | ❌ | — |
+
+## Features
 
 - **Read:** decode a video to upright RGBA frames, with rotation metadata
   applied and optional downscaling. Frames come one by one, or at a given
