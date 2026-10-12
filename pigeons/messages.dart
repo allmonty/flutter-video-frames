@@ -7,10 +7,36 @@ import 'package:pigeon/pigeon.dart';
     dartOut: 'lib/src/messages.g.dart',
     kotlinOut: 'android/src/main/kotlin/com/allmonty/video_frames/Messages.g.kt',
     kotlinOptions: KotlinOptions(package: 'com.allmonty.video_frames'),
-    swiftOut: 'ios/video_frames/Sources/video_frames/Messages.g.swift',
+    swiftOut: 'darwin/video_frames/Sources/video_frames/Messages.g.swift',
     dartPackageName: 'video_frames',
   ),
 )
+/// How frames are filtered when `maxDimension` scales them down.
+enum ScaleFilter {
+  /// Pick the source pixel at each output pixel's center: sharp, keeps hard
+  /// edges (pixel art), but aliases on photos.
+  nearest,
+
+  /// Blend the 2x2 source pixels around each output pixel's center: smooth
+  /// for downscales up to about 2x; larger ones alias again.
+  bilinear,
+
+  /// Average every source pixel an output pixel covers: smooth at any
+  /// downscale (e.g. 4K to 720p).
+  area,
+}
+
+/// The video codec a writer encodes with.
+enum VideoCodec {
+  /// Plays everywhere.
+  h264,
+
+  /// About half the size of H.264 at the same quality; needs a device with
+  /// an HEVC encoder (writer creation fails otherwise) and a player that
+  /// supports it.
+  hevc,
+}
+
 class VideoInfoMessage {
   VideoInfoMessage({
     required this.width,
@@ -53,13 +79,16 @@ class VideoFrameMessage {
   Uint8List rgba;
 }
 
-/// Every call runs on a serial background queue on the platform side, so
-/// decoding and encoding never block the platform's main thread. Readers and
-/// writers are addressed by ids chosen on the Dart side.
+// Readers and writers are separate APIs so each gets its own serial
+// background queue: decoding one frame can run while another is encoded.
+// Neither blocks the platform's main thread. Readers and writers are
+// addressed by ids chosen on the Dart side.
+
+/// Decoding, on its own serial background queue.
 @HostApi()
-abstract class VideoFramesHostApi {
+abstract class VideoReaderHostApi {
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
-  VideoInfoMessage openReader(int readerId, String path, int? maxDimension);
+  VideoInfoMessage openReader(int readerId, String path, int? maxDimension, ScaleFilter filter);
 
   /// The next frame in presentation order, or null at the end.
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
@@ -72,7 +101,11 @@ abstract class VideoFramesHostApi {
 
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
   void closeReader(int readerId);
+}
 
+/// Encoding, on its own serial background queue.
+@HostApi()
+abstract class VideoWriterHostApi {
   /// Returns whether the audio of `audioSourcePath` will be copied; audio
   /// that can't go into an MP4 unchanged is dropped instead of failing.
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
@@ -84,6 +117,7 @@ abstract class VideoFramesHostApi {
     double frameRate,
     int? bitRate,
     String? audioSourcePath,
+    VideoCodec codec,
   );
 
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)

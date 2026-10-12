@@ -1,5 +1,5 @@
-/// Decode video frames to RGBA and encode RGBA frames to H.264 MP4 (with the
-/// source's audio copied through), on Android and iOS.
+/// Decode video frames to RGBA and encode RGBA frames to H.264 or HEVC MP4 (with the
+/// source's audio copied through), on Android, iOS and macOS.
 ///
 /// Every call runs on a background queue on the platform side, and the API
 /// also works from background isolates (initialize
@@ -8,12 +8,67 @@ library;
 
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/services.dart' show PlatformException;
+
 import 'src/messages.g.dart';
 
-export 'src/messages.g.dart' show VideoFrameMessage, VideoFramesHostApi, VideoInfoMessage;
+export 'src/messages.g.dart' show ScaleFilter, VideoCodec;
+
+/// Why a [VideoFramesException] happened.
+enum VideoFramesErrorCode {
+  /// The input path doesn't exist.
+  fileNotFound,
+
+  /// The file exists but isn't a video the platform can open (no video
+  /// track, or a container it can't read).
+  unsupportedFormat,
+
+  /// No codec on this device can decode or encode it (e.g. HEVC on a device
+  /// without an HEVC encoder, or a size the encoders refuse).
+  codecUnsupported,
+
+  /// The encoder stopped producing output (Android).
+  encoderStalled,
+
+  /// Decoding failed partway (including a decoder that stalled).
+  readFailed,
+
+  /// Encoding or writing the file failed.
+  writeFailed,
+
+  /// A failure the plugin didn't classify.
+  unknown,
+}
+
+/// A failure from the platform side of a [VideoReader] or [VideoWriter].
+class VideoFramesException implements Exception {
+  /// A failure with its [code] and the platform's [message].
+  const VideoFramesException(this.code, this.message);
+
+  /// What kind of failure it was.
+  final VideoFramesErrorCode code;
+
+  /// The platform's description, for logs.
+  final String message;
+
+  @override
+  String toString() => 'VideoFramesException(${code.name}): $message';
+}
+
+/// Run a host call, turning the platform's errors into [VideoFramesException].
+Future<T> _guard<T>(Future<T> call) async {
+  try {
+    return await call;
+  } on PlatformException catch (e) {
+    final code = VideoFramesErrorCode.values.asNameMap()[e.code] ?? VideoFramesErrorCode.unknown;
+    throw VideoFramesException(code, e.message ?? e.code);
+  }
+}
 
 /// Metadata of an opened video.
 class VideoInfo {
+  /// Metadata as reported by [VideoReader.open].
   const VideoInfo({
     required this.width,
     required this.height,
@@ -24,14 +79,22 @@ class VideoInfo {
     this.audioCompatible = false,
   });
 
-  /// Size of the delivered frames (after rotation and any scaling).
+  /// Width of the delivered frames (after rotation and any scaling).
   final int width;
+
+  /// Height of the delivered frames (after rotation and any scaling).
   final int height;
+
+  /// Length of the video track.
   final Duration duration;
+
+  /// Nominal frames per second (30 when the file doesn't say).
   final double frameRate;
 
   /// The file's rotation metadata; frames are already upright.
   final int rotationDegrees;
+
+  /// Whether the file has an audio track.
   final bool hasAudio;
 
   /// The audio can be copied into an MP4 unchanged. When [hasAudio] is true
@@ -45,6 +108,7 @@ class VideoInfo {
 
 /// One decoded frame: row-major RGBA, `width * height * 4` bytes.
 class VideoFrame {
+  /// A frame shown at `pts`.
   const VideoFrame({
     required this.pts,
     required this.width,
@@ -52,34 +116,66 @@ class VideoFrame {
     required this.rgba,
   });
 
+  /// Presentation time: when the frame is shown.
   final Duration pts;
+
+  /// Width in pixels.
   final int width;
+
+  /// Height in pixels.
   final int height;
+
+  /// Row-major RGBA pixels, `width * height * 4` bytes, opaque alpha.
   final Uint8List rgba;
 }
 
 /// Entry point: holds the host API (swappable in tests).
 abstract final class VideoFrames {
-  /// The platform API; replace it with a fake in tests.
-  static VideoFramesHostApi api = VideoFramesHostApi();
+  /// The platform decoding API; replace it with a fake in tests (see
+  /// `package:video_frames/testing.dart`).
+  @visibleForTesting
+  static VideoReaderHostApi readerApi = VideoReaderHostApi();
+
+  /// The platform encoding API (a separate queue from [readerApi], so
+  /// decoding and encoding can overlap); replace it with a fake in tests.
+  @visibleForTesting
+  static VideoWriterHostApi writerApi = VideoWriterHostApi();
   static int _nextId = 1;
 
   static int _id() => _nextId++;
 }
 
-/// Reads frames from a video file.
+/// Reads frames from a video file. Always [close] it (e.g. in a `finally`):
+/// it holds a hardware decoder until then.
 class VideoReader {
-  VideoReader._(this._id, this.info);
+  VideoReader._(this._id, this.info) {
+    _finalizer.attach(this, _id, detach: this);
+  }
+
+  // A safety net for readers that are never closed; finalizers aren't
+  // guaranteed to run, so it doesn't replace [close].
+  static final _finalizer = Finalizer<int>((id) => VideoFrames.readerApi.closeReader(id).ignore());
 
   final int _id;
+
+  /// The video's size, length, frame rate, rotation and audio.
   final VideoInfo info;
   bool _closed = false;
 
-  /// Open `path`. With `maxDimension`, frames are scaled down (keeping the
-  /// aspect ratio) so neither edge exceeds it.
-  static Future<VideoReader> open(String path, {int? maxDimension}) async {
+  /// Open the video file at `path`: a file path, not a `content://` or
+  /// `file://` URI (pickers such as `file_picker` return copied file paths).
+  /// With `maxDimension`, frames are scaled down (keeping the
+  /// aspect ratio) so neither edge exceeds it, using `filter`: the default
+  /// [ScaleFilter.nearest] suits pixel art, [ScaleFilter.bilinear] small
+  /// downscales and [ScaleFilter.area] large ones. Applies to [nextFrame]
+  /// and [frameAt].
+  static Future<VideoReader> open(
+    String path, {
+    int? maxDimension,
+    ScaleFilter filter = ScaleFilter.nearest,
+  }) async {
     final id = VideoFrames._id();
-    final m = await VideoFrames.api.openReader(id, path, maxDimension);
+    final m = await _guard(VideoFrames.readerApi.openReader(id, path, maxDimension, filter));
     return VideoReader._(
       id,
       VideoInfo(
@@ -97,7 +193,7 @@ class VideoReader {
   /// The next frame in presentation order, or null at the end.
   Future<VideoFrame?> nextFrame() async {
     _checkOpen();
-    final m = await VideoFrames.api.nextFrame(_id);
+    final m = await _guard(VideoFrames.readerApi.nextFrame(_id));
     return m == null ? null : _frame(m);
   }
 
@@ -105,13 +201,16 @@ class VideoReader {
   /// [nextFrame]'s position.
   Future<VideoFrame> frameAt(Duration time) async {
     _checkOpen();
-    return _frame(await VideoFrames.api.frameAt(_id, time.inMicroseconds));
+    return _frame(await _guard(VideoFrames.readerApi.frameAt(_id, time.inMicroseconds)));
   }
 
+  /// Release the decoders. Calling it again does nothing; reading after it
+  /// throws a [StateError].
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    await VideoFrames.api.closeReader(_id);
+    _finalizer.detach(this);
+    await _guard(VideoFrames.readerApi.closeReader(_id));
   }
 
   void _checkOpen() {
@@ -126,7 +225,8 @@ class VideoReader {
   );
 }
 
-/// Encodes RGBA frames into an H.264 MP4.
+/// Encodes RGBA frames into an H.264 or HEVC MP4. Always [finish] or [cancel] it: it
+/// holds a hardware encoder until then.
 class VideoWriter {
   VideoWriter._(
     this._id,
@@ -135,13 +235,22 @@ class VideoWriter {
     this._requestedWidth,
     this._requestedHeight,
     this.includesAudio,
-  );
+  ) {
+    _finalizer.attach(this, _id, detach: this);
+  }
+
+  // A safety net for abandoned writers: the file is unfinished, so cancel
+  // (delete) it. Finalizers aren't guaranteed to run.
+  static final _finalizer = Finalizer<int>((id) => VideoFrames.writerApi.cancelWriter(id).ignore());
 
   final int _id;
 
-  /// Encoded size: the requested size rounded down to even numbers (H.264
-  /// needs even dimensions). Frames of the requested size are cropped.
+  /// Encoded width: the requested width rounded down to an even number
+  /// (H.264 and HEVC need even dimensions). Frames of the requested size are
+  /// cropped.
   final int width;
+
+  /// Encoded height, rounded down to an even number like [width].
   final int height;
   final int _requestedWidth;
   final int _requestedHeight;
@@ -152,8 +261,11 @@ class VideoWriter {
   final bool includesAudio;
   bool _done = false;
 
-  /// Create `path` (overwritten if it exists). With `audioSourcePath`, that
-  /// file's audio track is copied into the output when [finish] is called.
+  /// Create `path` (overwritten if it exists). With `audioSourcePath` (a
+  /// file path, like [VideoReader.open]'s), that file's audio track is
+  /// copied into the output when [finish] is called.
+  /// [VideoCodec.hevc] makes smaller files but fails on devices without an
+  /// HEVC encoder; fall back to [VideoCodec.h264] when it throws.
   static Future<VideoWriter> create(
     String path, {
     required int width,
@@ -161,18 +273,13 @@ class VideoWriter {
     required double frameRate,
     int? bitRate,
     String? audioSourcePath,
+    VideoCodec codec = VideoCodec.h264,
   }) async {
     final w = width & ~1, h = height & ~1;
     if (w < 2 || h < 2) throw ArgumentError('video must be at least 2x2, got ${width}x$height');
     final id = VideoFrames._id();
-    final audio = await VideoFrames.api.openWriter(
-      id,
-      path,
-      w,
-      h,
-      frameRate,
-      bitRate,
-      audioSourcePath,
+    final audio = await _guard(
+      VideoFrames.writerApi.openWriter(id, path, w, h, frameRate, bitRate, audioSourcePath, codec),
     );
     return VideoWriter._(id, w, h, width, height, audio);
   }
@@ -181,20 +288,24 @@ class VideoWriter {
   /// size before even-rounding) shown at `pts`.
   Future<void> addFrame(Uint8List rgba, Duration pts) {
     _checkOpen();
-    return VideoFrames.api.addFrame(_id, _fit(rgba), pts.inMicroseconds);
+    return _guard(VideoFrames.writerApi.addFrame(_id, _fit(rgba), pts.inMicroseconds));
   }
 
+  /// Flush the encoder, copy the audio track (if any) and close the file.
+  /// If it fails, the encoder is freed and the partial file deleted.
   Future<void> finish() {
     _checkOpen();
     _done = true;
-    return VideoFrames.api.finishWriter(_id);
+    _finalizer.detach(this);
+    return _guard(VideoFrames.writerApi.finishWriter(_id));
   }
 
   /// Stop and delete the partial file.
   Future<void> cancel() async {
     if (_done) return;
     _done = true;
-    await VideoFrames.api.cancelWriter(_id);
+    _finalizer.detach(this);
+    await _guard(VideoFrames.writerApi.cancelWriter(_id));
   }
 
   Uint8List _fit(Uint8List rgba) {

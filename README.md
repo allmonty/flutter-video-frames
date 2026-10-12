@@ -1,5 +1,8 @@
 # video_frames
 
+[![CI](https://github.com/allmonty/flutter-video-frames/actions/workflows/ci.yml/badge.svg)](https://github.com/allmonty/flutter-video-frames/actions/workflows/ci.yml)
+[![pub package](https://img.shields.io/pub/v/video_frames.svg)](https://pub.dev/packages/video_frames)
+
 A small Flutter plugin that takes a video apart into still pictures, and puts
 pictures back together into a video.
 
@@ -14,7 +17,16 @@ run its own image filters on every frame of a video and export the filtered
 result, without bundling a heavy video library like FFmpeg.
 
 **Technically:** it decodes video files to RGBA frames and encodes RGBA frames
-to H.264 in an MP4, using the phone's own hardware/system codecs (no FFmpeg).
+to H.264 or HEVC in an MP4, using the phone's own hardware/system codecs (no FFmpeg).
+
+![A frame decoded by video_frames, then filtered to grayscale and inverted](https://raw.githubusercontent.com/allmonty/flutter-video-frames/main/doc/before_after.png)
+
+*A frame read back from a video the plugin wrote, as is, in grayscale and
+inverted: the two filters in the [example app](example/lib/main.dart).*
+
+```sh
+flutter pub add video_frames
+```
 
 ## Platforms
 
@@ -22,14 +34,15 @@ to H.264 in an MP4, using the phone's own hardware/system codecs (no FFmpeg).
 |---|---|---|
 | Android | ✅ | Android 7.0 (API 24) |
 | iOS | ✅ | iOS 15 |
-| Web, macOS, Windows, Linux | ❌ | — |
+| macOS | ✅ | macOS 12 |
+| Web, Windows, Linux | ❌ | — |
 
 ## Features
 
 - **Read:** decode a video to upright RGBA frames, with rotation metadata
   applied and optional downscaling. Frames come one by one, or at a given
   time for scrubbing.
-- **Write:** encode RGBA frames to H.264 in an MP4, optionally copying
+- **Write:** encode RGBA frames to H.264 or HEVC in an MP4, optionally copying
   another file's audio track through unchanged.
 
 Every call runs on a background queue on the platform side. The API also
@@ -37,8 +50,21 @@ works from a background isolate, after calling
 `BackgroundIsolateBinaryMessenger.ensureInitialized`, so a whole
 decode → process → encode loop can run off the UI thread.
 
-It has no dependencies beyond Flutter and was written to be reusable outside
-Bitmapper.
+It has no dependencies beyond Flutter.
+
+## Compared to other options
+
+- **No FFmpeg.** It uses the codecs already on the device (MediaCodec,
+  AVFoundation), so it adds almost nothing to the app's size and brings no
+  GPL/LGPL licensing questions.
+- **Read and write in one package,** at the level of individual RGBA frames,
+  so any filter or effect written in Dart (or on the GPU, then read back)
+  can be applied to every frame.
+- **Audio is copied, not re-encoded,** so the sound keeps its quality and
+  costs no processing time.
+- **Not a player or an editor:** there's no timeline, trimming or
+  transitions. For playback use `video_player`; for general transcoding,
+  FFmpeg-based packages cover far more formats.
 
 ## Usage
 
@@ -51,16 +77,83 @@ final writer = await VideoWriter.create(
   frameRate: reader.info.frameRate,
   audioSourcePath: reader.info.hasAudio ? inputPath : null,
 );
-VideoFrame? frame;
-while ((frame = await reader.nextFrame()) != null) {
-  await writer.addFrame(process(frame!.rgba), frame.pts);
+try {
+  VideoFrame? frame;
+  while ((frame = await reader.nextFrame()) != null) {
+    await writer.addFrame(process(frame!.rgba), frame.pts);
+  }
+  await writer.finish();
+} catch (_) {
+  await writer.cancel();   // deletes the partial file
+  rethrow;
+} finally {
+  await reader.close();
 }
-await writer.finish();   // or writer.cancel() to delete the partial file
-await reader.close();
+
+// Decoding and encoding run on separate native queues. To overlap them,
+// request the next frame before awaiting the current one's encode:
+//   var next = reader.nextFrame();
+//   for (var f = await next; f != null; f = await next) {
+//     next = reader.nextFrame();               // decode n+1 ...
+//     await writer.addFrame(process(f.rgba), f.pts); // ... while encoding n
+//   }
+
+// Readers and writers hold hardware codecs, so always close them as above.
+// A forgotten one is freed when it's garbage-collected, but that may be late.
 
 // Scrubbing:
 final still = await reader.frameAt(const Duration(seconds: 3));
 ```
+
+Paths are file paths, not `content://` URIs. File pickers such as
+`file_picker` and `image_picker` already return copied file paths.
+
+`maxDimension` scales frames down; pick how with `filter`:
+`ScaleFilter.nearest` (default, sharp, for pixel art), `ScaleFilter.bilinear`
+(smooth for small downscales) or `ScaleFilter.area` (averages every covered
+pixel, best for large downscales like 4K to 720p):
+
+```dart
+final reader = await VideoReader.open(path, maxDimension: 720, filter: ScaleFilter.area);
+```
+
+## Errors
+
+Failures throw a `VideoFramesException` whose `code` says what happened:
+
+| `VideoFramesErrorCode` | When |
+|---|---|
+| `fileNotFound` | The input path doesn't exist. |
+| `unsupportedFormat` | The file isn't a video the platform can open. |
+| `codecUnsupported` | No codec on the device can handle it, e.g. HEVC without an HEVC encoder. Fall back to H.264. |
+| `encoderStalled` | The encoder stopped producing output (Android). |
+| `readFailed` | Decoding failed partway. |
+| `writeFailed` | Encoding or writing the file failed. |
+| `unknown` | Anything else. |
+
+```dart
+try {
+  writer = await VideoWriter.create(path, width: w, height: h, frameRate: 30, codec: VideoCodec.hevc);
+} on VideoFramesException catch (e) {
+  if (e.code != VideoFramesErrorCode.codecUnsupported) rethrow;
+  writer = await VideoWriter.create(path, width: w, height: h, frameRate: 30);
+}
+```
+
+## Memory
+
+Every frame is uncompressed RGBA, and it is copied a few times on its way
+between the platform and Dart:
+
+| Frame size | One frame |
+|---|---|
+| 720p | 3.7 MB |
+| 1080p | 8.3 MB |
+| 4K | 33 MB |
+
+For editing, open readers with `maxDimension: 1920` (or smaller) unless you
+target high-end devices; 4K frames can run mid-range Android phones out of
+memory.
 
 ## Audio
 
@@ -83,20 +176,38 @@ What counts as compatible depends on the platform:
   accepts AAC and even PCM. PCM-in-MP4 plays on Apple devices but may not
   play everywhere else.
 
-H.264 needs even dimensions. `VideoWriter` rounds the size down to even
+H.264 and HEVC need even dimensions. `VideoWriter` rounds the size down to even
 numbers (`writer.width` and `writer.height`) and crops frames given at the
 requested size.
 
+## Colors
+
+Written videos are tagged as BT.709 SDR, the standard for HD, so players
+don't have to guess. When reading, iOS converts with the video's own color
+tags. On Android the GPU driver is expected to apply them; the Android
+emulator's doesn't, so colors read there can be slightly off.
+
+HDR input (HLG or PQ, like iPhone videos) is converted to SDR when read: iOS
+uses AVFoundation's tone mapping; Android 13+ asks the decoder to tone-map
+(below Android 13 HDR frames look washed out). Android plays iPhones' Dolby
+Vision videos through their HEVC base layer when the device has no Dolby
+Vision decoder.
+
+`codec: VideoCodec.hevc` writes HEVC instead of H.264: about half the file
+size at the same quality, but writer creation fails on devices without an
+HEVC encoder (`VideoFramesErrorCode.codecUnsupported`), so fall back to
+H.264 then.
+
 ## How it works
 
-| | Android (minSdk 24) | iOS (15+) |
+| | Android (minSdk 24) | iOS 15+ and macOS 12+ (shared code) |
 |---|---|---|
-| Decode | `MediaExtractor` + `MediaCodec`, YUV via `getOutputImage`, converted and rotated in Kotlin | `AVAssetReader` (BGRA), converted and rotated in Swift |
+| Decode | `MediaExtractor` + `MediaCodec` into a `SurfaceTexture`; OpenGL ES converts, rotates and scales, then reads back RGBA | `AVAssetReader` (BGRA); rotated and converted with Accelerate (vImage) |
 | Seek (`frameAt`) | A second decoder: seek to the previous sync frame, then decode forward | `AVAssetImageGenerator` with zero tolerance |
-| Encode | `MediaCodec` AVC, YUV via `getInputImage`, explicit timestamps, `MediaMuxer` | `AVAssetWriter` + pixel-buffer adaptor |
+| Encode | RGBA drawn with OpenGL ES into the `MediaCodec` AVC input surface, explicit timestamps, `MediaMuxer` | `AVAssetWriter` + pixel-buffer adaptor, converted with vImage |
 | Audio | Samples copied through `MediaExtractor` → `MediaMuxer` | Passthrough `AVAssetReaderTrackOutput` → `AVAssetWriterInput` |
 
-On iOS the plugin supports both Swift Package Manager (`ios/video_frames/Package.swift`) and CocoaPods (`ios/video_frames.podspec`). The sources are in `ios/video_frames/Sources/video_frames/`. On Android it follows Flutter 3.47's plugin template: AGP 9, with the JVM target set through `kotlin { compilerOptions }`.
+On iOS and macOS the plugin shares one Swift implementation, with both Swift Package Manager (`darwin/video_frames/Package.swift`) and CocoaPods (`darwin/video_frames.podspec`). The sources are in `darwin/video_frames/Sources/video_frames/`. On Android it follows Flutter 3.47's plugin template: AGP 9, with the JVM target set through `kotlin { compilerOptions }`.
 
 The channel API is generated by Pigeon. To regenerate it:
 
@@ -107,11 +218,13 @@ dart run pigeon --input pigeons/messages.dart
 ## Tests
 
 - `flutter test`: tests the Dart API against a fake host.
-- Kotlin conversion tests, from `example/android`:
+- Kotlin unit tests (frame size, rotation mapping), from `example/android`:
   `./gradlew :video_frames:testDebugUnitTest`. This needs a JDK 17–21,
   such as Android Studio's bundled one.
 - `tool/apple_check.sh`: runs the Swift reader and writer against real
   AVFoundation on macOS. It checks encoding, decoding, seeking, scaling,
   rotation, cancelling and audio passthrough, with no device needed.
-- `example/integration_test`: a round trip on a device or emulator:
-  `cd example && flutter test integration_test`.
+- `example/integration_test`: the device tests, on an Android device or
+  emulator, an iOS device or simulator, or this Mac:
+  `cd example && flutter test integration_test -d <device>` (`-d macos`
+  runs them natively on macOS).

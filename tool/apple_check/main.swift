@@ -28,8 +28,63 @@ let reader = try FrameReader(path: path, maxDimension: nil)
 check(reader.width == w && reader.height == h, "size \(reader.width)x\(reader.height)")
 check(!reader.hasAudio, "no audio")
 check(reader.rotation == 0, "rotation 0")
+let format = AVURLAsset(url: URL(fileURLWithPath: path)).tracks(withMediaType: .video)[0].formatDescriptions[0] as! CMFormatDescription
+let matrix = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_YCbCrMatrix) as? String
+check(matrix == (kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2 as String), "output tagged BT.709 (\(matrix ?? "untagged"))")
+
+// Error codes reported to Dart.
+func code(_ body: () throws -> Any) -> String {
+  do { _ = try body(); return "no error" } catch let e as VideoFramesError { return e.code } catch { return "\(error)" }
+}
+check(code { try FrameReader(path: "/nonexistent/video.mp4", maxDimension: nil) } == "fileNotFound", "missing file -> fileNotFound")
+let notVideo = NSTemporaryDirectory() + "vf_not_a_video.mp4"
+try "not a video".write(toFile: notVideo, atomically: true, encoding: .utf8)
+check(code { try FrameReader(path: notVideo, maxDimension: nil) } == "unsupportedFormat", "non-video file -> unsupportedFormat")
+
+// HEVC: a round trip through the HEVC encoder.
+let hevcPath = NSTemporaryDirectory() + "vf_check_hevc.mp4"
+let hevcWriter = try FrameWriter(path: hevcPath, width: w, height: h, frameRate: 30, bitRate: nil, audioSourcePath: nil, hevc: true)
+for i in 0..<10 { try hevcWriter.addFrame(rgba: frame(w, h, i), ptsUs: Int64(i) * 33333) }
+try hevcWriter.finish()
+let hevcFormat = AVURLAsset(url: URL(fileURLWithPath: hevcPath)).tracks(withMediaType: .video)[0].formatDescriptions[0] as! CMFormatDescription
+check(CMFormatDescriptionGetMediaSubType(hevcFormat) == kCMVideoCodecType_HEVC, "HEVC writer writes HEVC")
+let hevcReader = try FrameReader(path: hevcPath, maxDimension: nil)
+var hevcFrames = 0
+var hevcFirst: Data?
+while let f = try hevcReader.next() { hevcFirst = hevcFirst ?? f.rgba; hevcFrames += 1 }
+check(hevcFrames == 10, "HEVC decoded \(hevcFrames) frames")
+check(hevcFirst![o] > 170 && hevcFirst![o + 1] < 100, "HEVC top-left is red")
+
+// HDR (HLG / BT.2020, 10-bit HEVC) input: AVFoundation tone-maps it to SDR, and frameAt matches next().
+let hlg = try FrameReader(path: "example/integration_test/assets/hlg.mp4", maxDimension: nil)
+let hlgNext = try hlg.next()!.rgba
+let hlgSeek = try hlg.frame(atUs: 0).rgba
+let gray = ((270 * hlg.width + 480) * 4)
+let (gr, gg, gb) = (Int(hlgNext[gray]), Int(hlgNext[gray + 1]), Int(hlgNext[gray + 2]))
+check(abs(gr - gg) < 12 && abs(gg - gb) < 12 && gg > 60 && gg < 200, "HDR gray stays neutral and mid-range: \(gr) \(gg) \(gb)")
+check(zip(hlgNext, hlgSeek).allSatisfy { abs(Int($0) - Int($1)) <= 12 }, "HDR frameAt matches next()")
+
+// HD colors that shift by 20+ under a 601/709 mix-up survive a round trip.
+let hdColors: [(UInt8, UInt8, UInt8)] = [(40, 200, 60), (224, 172, 140), (200, 40, 40), (40, 60, 200)]
+let (hw, hh) = (1280, 720)
+var hd = Data(count: hw * hh * 4)
+for y in 0..<hh { for x in 0..<hw {
+  let (r, g, b) = hdColors[(y < hh / 2 ? 0 : 2) + (x < hw / 2 ? 0 : 1)]
+  let o = (y * hw + x) * 4
+  hd[o] = r; hd[o + 1] = g; hd[o + 2] = b; hd[o + 3] = 255
+} }
+let hdPath = NSTemporaryDirectory() + "vf_check_hd.mp4"
+let hdWriter = try FrameWriter(path: hdPath, width: hw, height: hh, frameRate: 30, bitRate: nil, audioSourcePath: nil)
+for i in 0..<5 { try hdWriter.addFrame(rgba: hd, ptsUs: Int64(i) * 33333) }
+try hdWriter.finish()
+let hdFrame = try FrameReader(path: hdPath, maxDimension: nil).next()!.rgba
+for (q, (r, g, b)) in hdColors.enumerated() {
+  let o = ((q < 2 ? hh / 4 : hh * 3 / 4) * hw + (q % 2 == 0 ? hw / 4 : hw * 3 / 4)) * 4
+  let got = (Int(hdFrame[o]), Int(hdFrame[o + 1]), Int(hdFrame[o + 2]))
+  check(abs(got.0 - Int(r)) <= 12 && abs(got.1 - Int(g)) <= 12 && abs(got.2 - Int(b)) <= 12, "HD color \((r, g, b)) -> \(got)")
+}
 var count = 0
-var first: [UInt8]? = nil
+var first: Data? = nil
 var lastPts: Int64 = -1
 while let f = try reader.next() { if first == nil { first = f.rgba }; check(f.ptsUs > lastPts, "pts increases \(f.ptsUs)"); lastPts = f.ptsUs; count += 1 }
 check(count == 30, "decoded \(count) frames")
@@ -48,12 +103,36 @@ check(scaled.width == 160 && scaled.height == 120, "scaled \(scaled.width)x\(sca
 let sf = try scaled.next()!
 check(sf.rgba.count == 160 * 120 * 4, "scaled frame bytes")
 
+// Scale filters on 8x2 stripes (columns 0,255,0,0,0,255,0,0) down to 2x1: each filter gives a different value.
+let stripes = (0..<2).flatMap { _ in [0, 255, 0, 0, 0, 255, 0, 0].flatMap { v in [UInt8](repeating: UInt8(v), count: 4) } }
+func scaled(_ filter: PixelConversion.Filter) -> UInt8 {
+  var out = [UInt8](repeating: 0, count: 2 * 4)
+  stripes.withUnsafeBufferPointer { src in out.withUnsafeMutableBufferPointer { dst in
+    PixelConversion.scale(src.baseAddress!, srcWidth: 8, srcHeight: 2, bytesPerRow: 32, filter: filter, into: dst.baseAddress!, width: 2, height: 1)
+  } }
+  return out[0]
+}
+check(scaled(.nearest) == 0, "nearest samples the center pixel: \(scaled(.nearest))")
+check(scaled(.bilinear) == 128, "bilinear blends the two center pixels: \(scaled(.bilinear))")
+check(scaled(.area) == 64, "area averages the whole block: \(scaled(.area))")
+
+// frameAt (image generator) and next() (asset reader) filter the same way.
+let areaReader = try FrameReader(path: path, maxDimension: 160, filter: .area)
+let viaNext = try areaReader.next()!.rgba
+let viaSeek = try areaReader.frame(atUs: 0).rgba
+check(viaSeek.count == viaNext.count, "frameAt size matches next() with a filter")
+check(zip(viaNext, viaSeek).allSatisfy { abs(Int($0) - Int($1)) <= 10 }, "frameAt pixels match next() with area filtering")
+
 // Rotation mapping on a synthetic BGRA buffer: 4x2, left half red, right blue.
 var bgra = [UInt8](repeating: 0, count: 4 * 2 * 4)
 for y in 0..<2 { for x in 0..<4 { let i = (y * 4 + x) * 4; if x < 2 { bgra[i + 2] = 255 } else { bgra[i] = 255 }; bgra[i + 3] = 255 } }
 let rot = bgra.withUnsafeBufferPointer { PixelConversion.bgraToRgba($0.baseAddress!, srcWidth: 4, srcHeight: 2, bytesPerRow: 16, rotation: 90, dstWidth: 2, dstHeight: 4) }
 check(rot[0] == 255 && rot[2] == 0, "rotate 90: top is red")
 check(rot[(3 * 2) * 4 + 2] == 255, "rotate 90: bottom is blue")
+let rot180 = bgra.withUnsafeBufferPointer { PixelConversion.bgraToRgba($0.baseAddress!, srcWidth: 4, srcHeight: 2, bytesPerRow: 16, rotation: 180, dstWidth: 4, dstHeight: 2) }
+check(rot180[2] == 255 && rot180[3 * 4] == 255, "rotate 180: left is blue, right is red")
+let rot270 = bgra.withUnsafeBufferPointer { PixelConversion.bgraToRgba($0.baseAddress!, srcWidth: 4, srcHeight: 2, bytesPerRow: 16, rotation: 270, dstWidth: 2, dstHeight: 4) }
+check(rot270[2] == 255 && rot270[(3 * 2) * 4] == 255, "rotate 270: top is blue, bottom is red")
 check(PixelConversion.rotationDegrees(a: 0, b: 1) == 90 && PixelConversion.rotationDegrees(a: -1, b: 0) == 180 && PixelConversion.rotationDegrees(a: 0, b: -1) == 270, "rotation from transform")
 
 let cancelPath = NSTemporaryDirectory() + "vf_cancel.mp4"

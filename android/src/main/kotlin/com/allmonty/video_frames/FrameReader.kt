@@ -1,20 +1,23 @@
 package com.allmonty.video_frames
 
 import android.media.MediaCodec
-import android.media.MediaCodecInfo
+import android.media.MediaCodecInfo.CodecProfileLevel
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.os.Build
+import java.nio.ByteBuffer
 
 /**
  * Decodes the video track of a file to RGBA frames, upright (rotation
- * metadata applied) and optionally scaled down. Uses the decoder's
- * `getOutputImage` (YUV_420_888), so no Surface or GL is needed.
+ * metadata applied) and optionally scaled down. The decoder renders to a
+ * GPU surface, and [GlRenderer] converts, rotates and scales each frame.
  *
  * Decoders are created lazily: one for sequential reading ([next]) and one
  * for seeking ([frameAt]), so scrubbing alone holds a single hardware
  * decoder.
  */
-class FrameReader(private val path: String, private val maxDimension: Int?) {
+class FrameReader(private val path: String, private val maxDimension: Int?, private val filter: ScaleFilter) {
     private var sequential: Decoder? = null
     private var seeker: Decoder? = null
 
@@ -33,6 +36,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
     init {
         val extractor = MediaExtractor()
         try {
+            // shortcut: content:// URIs unsupported on Android; add a Context + Uri overload if users ask.
             extractor.setDataSource(path)
             var video: MediaFormat? = null
             var audio: MediaFormat? = null
@@ -57,10 +61,16 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
         } finally {
             extractor.release()
         }
-        val (w, h) = ColorConversion.outputSize(srcWidth, srcHeight, rotation, maxDimension)
+        val (w, h) = FrameSize.outputSize(srcWidth, srcHeight, rotation, maxDimension)
         width = w
         height = h
     }
+
+    /** Area taps per axis: each bilinear tap covers 2 source pixels. */
+    private val areaTaps = minOf(
+        GlRenderer.MAX_AREA_TAPS,
+        Math.ceil(maxOf(srcWidth, srcHeight).toDouble() / maxOf(width, height) / 2).toInt(),
+    ).coerceAtLeast(1)
 
     /** The next frame in presentation order, or null at the end. */
     fun next(): Pair<Long, ByteArray>? {
@@ -98,19 +108,33 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
         seeker = null
     }
 
-    /** One extractor + decoder pair over the video track. */
+    /** One extractor + decoder + GL renderer over the video track. */
     private inner class Decoder {
+        // One frame buffer per decoder, reused: Pigeon encodes (copies) the reply
+        // before the reader's serial queue runs the next call.
+        private val frame = ByteArray(width * height * 4)
+        private val pixels = ByteBuffer.wrap(frame)
+        private val renderer = GlRenderer.forDecoding(width, height, filter, areaTaps, srcWidth, srcHeight)
         private val extractor = MediaExtractor()
-        private val codec: MediaCodec
+        /** e.g. "c2.goldfish.hevc.decoder (video/hevc 640x360)", for error messages; set by openCodec. */
+        private var description = "video decoder"
+        private val codec: MediaCodec = try {
+            openCodec()
+        } catch (e: Exception) {
+            renderer.release()
+            extractor.release()
+            throw e
+        }
         private val info = MediaCodec.BufferInfo()
         private var inputDone = false
         private var outputDone = false
+        private var fed = false
 
         /** Presentation time of the last frame decoded (converted or not). */
         var lastPtsUs = -1L
             private set
 
-        init {
+        private fun openCodec(): MediaCodec {
             extractor.setDataSource(path)
             var track = -1
             for (i in 0 until extractor.trackCount) {
@@ -119,26 +143,35 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
             }
             extractor.selectTrack(track)
             val format = extractor.getTrackFormat(track)
-            val mime = format.getString(MediaFormat.KEY_MIME)!!
-            codec = MediaCodec.createDecoderByType(mime)
-            try {
+            val trackMime = format.getString(MediaFormat.KEY_MIME)!!
+            val mime = decodableMime(format)
+            val size = "${format.getInteger(MediaFormat.KEY_WIDTH)}x${format.getInteger(MediaFormat.KEY_HEIGHT)}"
+            val (codec, _) = Codecs.startFirst(decoderNames(format, mime), "$mime decoder at $size") { codec ->
+                // Rotation isn't passed on: the renderer applies it.
                 val config = MediaFormat.createVideoFormat(mime, format.getInteger(MediaFormat.KEY_WIDTH), format.getInteger(MediaFormat.KEY_HEIGHT))
-                for (key in listOf("csd-0", "csd-1", "csd-2")) {
+                // A Dolby Vision base layer only needs the HEVC/AVC parameter sets (csd-0).
+                val csd = if (mime == trackMime) listOf("csd-0", "csd-1", "csd-2") else listOf("csd-0")
+                for (key in csd) {
                     if (format.containsKey(key)) config.setByteBuffer(key, format.getByteBuffer(key))
                 }
-                config.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-                codec.configure(config, null, null, 0)
+                if (Build.VERSION.SDK_INT >= 33 && isHdr(format)) {
+                    // Ask for HDR to be tone-mapped to SDR. Only for HDR: on SDR video
+                    // Qualcomm decoders fail with this request ("not a supported pixel format").
+                    config.setInteger(MediaFormat.KEY_COLOR_TRANSFER_REQUEST, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+                }
+                // shortcut: below API 33 HDR input isn't tone-mapped (looks washed out); tone-map in the shader if users hit it.
+                codec.configure(config, renderer.surface, null, 0)
                 codec.start()
-            } catch (e: Exception) {
-                codec.release()
-                extractor.release()
-                throw e
             }
+            description = "${codec.name} ($mime $size)"
+            return codec
         }
 
         fun seek(timeUs: Long) {
             extractor.seekTo(timeUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-            codec.flush()
+            // Flushing a surface decoder that has had no input can leave it never rendering.
+            if (fed) codec.flush()
+            fed = false
             inputDone = false
             outputDone = false
         }
@@ -148,7 +181,15 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
          * return it converted; earlier frames are released unconverted.
          * Returns null at the end of the stream.
          */
-        fun nextAtOrAfter(minPtsUs: Long): Pair<Long, ByteArray>? {
+        fun nextAtOrAfter(minPtsUs: Long): Pair<Long, ByteArray>? = try {
+            decodeUntil(minPtsUs)
+        } catch (e: IllegalStateException) {
+            // A codec that fails mid-stream (e.g. unsupported 10-bit video) only says
+            // "Invalid to call at Released state"; name the codec and the video.
+            throw IllegalStateException("$description can't decode this video: ${e.message}", e)
+        }
+
+        private fun decodeUntil(minPtsUs: Long): Pair<Long, ByteArray>? {
             var idleSince = System.nanoTime()
             while (!outputDone) {
                 var progressed = false
@@ -156,6 +197,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
                     val inIndex = codec.dequeueInputBuffer(TIMEOUT_US)
                     if (inIndex >= 0) {
                         progressed = true
+                        fed = true
                         val buffer = codec.getInputBuffer(inIndex)!!
                         val size = extractor.readSampleData(buffer, 0)
                         if (size < 0) {
@@ -175,13 +217,11 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
                         val pts = info.presentationTimeUs
                         lastPtsUs = pts
                         if (pts >= minPtsUs) {
-                            try {
-                                return Pair(pts, convert(outIndex))
-                            } finally {
-                                codec.releaseOutputBuffer(outIndex, false)
-                            }
+                            codec.releaseOutputBuffer(outIndex, true)
+                            return Pair(pts, readRendered())
                         }
                     }
+                    // Frames before the target are dropped without rendering.
                     codec.releaseOutputBuffer(outIndex, false)
                 } else if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     progressed = true
@@ -203,32 +243,66 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
             return null
         }
 
-        private fun convert(index: Int): ByteArray {
-            val image = codec.getOutputImage(index)
-                ?: throw IllegalStateException("decoder gave no YUV image")
-            try {
-                val planes = image.planes
-                val crop = image.cropRect
-                return ColorConversion.yuvToRgba(
-                    ColorConversion.Plane(planes[0].buffer, planes[0].rowStride, planes[0].pixelStride),
-                    ColorConversion.Plane(planes[1].buffer, planes[1].rowStride, planes[1].pixelStride),
-                    ColorConversion.Plane(planes[2].buffer, planes[2].rowStride, planes[2].pixelStride),
-                    crop.left, crop.top, crop.width(), crop.height(),
-                    rotation, width, height,
-                )
-            } finally {
-                image.close()
-            }
+        private fun readRendered(): ByteArray {
+            renderer.use { readFrame(rotation, pixels) }
+            return frame
         }
 
         fun release() {
             try { codec.stop() } catch (_: IllegalStateException) {}
             codec.release()
+            renderer.release()
             extractor.release()
         }
     }
 
     companion object {
+        /**
+         * Dolby Vision profiles 8 and 9 (iPhones record 8.4) carry an HEVC or
+         * AVC base layer that ordinary decoders play; use it when the device
+         * has no Dolby Vision decoder, which is common.
+         */
+        fun decodableMime(format: MediaFormat): String {
+            val mime = format.getString(MediaFormat.KEY_MIME)!!
+            if (mime != MediaFormat.MIMETYPE_VIDEO_DOLBY_VISION) return mime
+            if (MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format) != null) return mime
+            val profile = if (format.containsKey(MediaFormat.KEY_PROFILE)) format.getInteger(MediaFormat.KEY_PROFILE) else -1
+            return when (profile) {
+                CodecProfileLevel.DolbyVisionProfileDvheSt -> MediaFormat.MIMETYPE_VIDEO_HEVC
+                CodecProfileLevel.DolbyVisionProfileDvavSe -> MediaFormat.MIMETYPE_VIDEO_AVC
+                // Other profiles have no compatible base layer; creating the decoder fails with a clear error.
+                else -> mime
+            }
+        }
+
+        /** HLG or PQ transfer, or Dolby Vision (which may carry no color keys). */
+        private fun isHdr(track: MediaFormat): Boolean {
+            if (track.getString(MediaFormat.KEY_MIME) == MediaFormat.MIMETYPE_VIDEO_DOLBY_VISION) return true
+            if (!track.containsKey(MediaFormat.KEY_COLOR_TRANSFER)) return false
+            val transfer = track.getInteger(MediaFormat.KEY_COLOR_TRANSFER)
+            return transfer == MediaFormat.COLOR_TRANSFER_HLG || transfer == MediaFormat.COLOR_TRANSFER_ST2084
+        }
+
+        /**
+         * Decoders that support the track's profile (e.g. 10-bit HEVC), in
+         * preference order: a type's default decoder may not, as on the
+         * emulator. Falls back to every decoder of the type if none claims it.
+         */
+        private fun decoderNames(track: MediaFormat, mime: String): List<String> {
+            val wanted = MediaFormat.createVideoFormat(mime, track.getInteger(MediaFormat.KEY_WIDTH), track.getInteger(MediaFormat.KEY_HEIGHT))
+            val profile = when {
+                // Dolby Vision profile 8's base layer is always 10-bit HEVC.
+                mime != track.getString(MediaFormat.KEY_MIME) && mime == MediaFormat.MIMETYPE_VIDEO_HEVC ->
+                    CodecProfileLevel.HEVCProfileMain10
+                mime != track.getString(MediaFormat.KEY_MIME) -> null
+                track.containsKey(MediaFormat.KEY_PROFILE) -> track.getInteger(MediaFormat.KEY_PROFILE)
+                else -> null
+            }
+            if (profile != null) wanted.setInteger(MediaFormat.KEY_PROFILE, profile)
+            return Codecs.names(mime, encoder = false) { it.isFormatSupported(wanted) }
+                .ifEmpty { Codecs.names(mime, encoder = false) { true } }
+        }
+
         private const val TIMEOUT_US = 10_000L
         private const val END_OF_STREAM_GRACE_MS = 1_000L
         private const val STALL_MS = 5_000L

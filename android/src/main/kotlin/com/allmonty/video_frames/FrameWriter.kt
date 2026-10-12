@@ -5,13 +5,14 @@ import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.view.Surface
 import java.io.File
 import java.nio.ByteBuffer
 
 /**
- * Encodes RGBA frames to H.264 in an MP4, optionally copying the audio track
- * of another file. Frames go in through the encoder's YUV input images with
- * explicit timestamps.
+ * Encodes RGBA frames to H.264 or HEVC in an MP4, optionally copying the audio track
+ * of another file. Frames are drawn into the encoder's input surface by
+ * [GlRenderer], with explicit timestamps.
  */
 class FrameWriter(
     private val path: String,
@@ -20,32 +21,68 @@ class FrameWriter(
     frameRate: Double,
     bitRate: Int?,
     audioSourcePath: String?,
+    videoCodec: VideoCodec = VideoCodec.H264,
 ) {
-    private val codec: MediaCodec = MediaCodec.createEncoderByType(MIME)
-    private val muxer = MediaMuxer(path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+    private val mime = if (videoCodec == VideoCodec.HEVC) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+
+    private val codec: MediaCodec
+    private val inputSurface: Surface
+
+    init {
+        require(width % 2 == 0 && height % 2 == 0) { "size must be even, got ${width}x$height" }
+        val format = MediaFormat.createVideoFormat(mime, width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitRate ?: defaultBitRate(width, height, frameRate))
+            setFloat(MediaFormat.KEY_FRAME_RATE, frameRate.toFloat())
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            // Ask for, and tag, BT.709 so players don't guess (HD is 709; untagged often reads as 601).
+            setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+            setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+            setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+        }
+        val candidates = Codecs.names(mime, encoder = true) { it.videoCapabilities?.isSizeSupported(width, height) == true }
+        val (started, surface) = Codecs.startFirst(candidates, "${videoCodec.name} encoder at ${width}x$height") { c ->
+            c.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            val input = c.createInputSurface()
+            try {
+                c.start()
+            } catch (e: Exception) {
+                input.release()
+                throw e
+            }
+            input
+        }
+        codec = started
+        inputSurface = surface
+    }
+
+    private val muxer = try {
+        MediaMuxer(path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+    } catch (e: Exception) {
+        codec.release()
+        inputSurface.release()
+        throw e
+    }
     private val info = MediaCodec.BufferInfo()
     private var videoTrack = -1
     private var muxerStarted = false
 
     private var audioExtractor: MediaExtractor? = null
     private var audioTrack = -1
+    private var renderer: GlRenderer? = null
 
     /** Whether the audio source's track will be copied (see [AudioSupport]). */
     val audioIncluded: Boolean
         get() = audioExtractor != null
 
     init {
-        require(width % 2 == 0 && height % 2 == 0) { "size must be even, got ${width}x$height" }
-        val format = MediaFormat.createVideoFormat(MIME, width, height).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-            setInteger(MediaFormat.KEY_BIT_RATE, bitRate ?: defaultBitRate(width, height, frameRate))
-            setFloat(MediaFormat.KEY_FRAME_RATE, frameRate.toFloat())
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+        try {
+            renderer = GlRenderer.forEncoding(inputSurface, width, height)
+            if (audioSourcePath != null) openAudio(audioSourcePath)
+        } catch (e: Exception) {
+            cancel()
+            throw e
         }
-        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        codec.start()
-
-        if (audioSourcePath != null) openAudio(audioSourcePath)
     }
 
     /**
@@ -59,8 +96,8 @@ class FrameWriter(
             extractor.setDataSource(source)
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-                if (!mime.startsWith("audio/")) continue
+                val trackMime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (!trackMime.startsWith("audio/")) continue
                 audioTrack = muxer.addTrack(format)
                 extractor.selectTrack(i)
                 audioExtractor = extractor
@@ -75,32 +112,21 @@ class FrameWriter(
 
     fun addFrame(rgba: ByteArray, ptsUs: Long) {
         require(rgba.size == width * height * 4) { "expected ${width * height * 4} bytes, got ${rgba.size}" }
-        var index: Int
-        do {
-            index = codec.dequeueInputBuffer(TIMEOUT_US)
-            if (index < 0) drain(false)
-        } while (index < 0)
-        val image = codec.getInputImage(index) ?: throw IllegalStateException("encoder gave no YUV image")
-        val planes = image.planes
-        ColorConversion.rgbaToYuv(
-            rgba, width, height,
-            ColorConversion.Plane(planes[0].buffer, planes[0].rowStride, planes[0].pixelStride),
-            ColorConversion.Plane(planes[1].buffer, planes[1].rowStride, planes[1].pixelStride),
-            ColorConversion.Plane(planes[2].buffer, planes[2].rowStride, planes[2].pixelStride),
-        )
-        codec.queueInputBuffer(index, 0, width * height * 3 / 2, ptsUs, 0)
+        // Free output space first, so drawing into the input surface can't block on a full encoder.
         drain(false)
+        renderer!!.use { writeFrame(rgba, ptsUs) }
     }
 
     fun finish() {
-        var index: Int
-        do {
-            index = codec.dequeueInputBuffer(TIMEOUT_US)
-            if (index < 0) drain(false)
-        } while (index < 0)
-        codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-        drain(true)
-        copyAudio()
+        try {
+            codec.signalEndOfInputStream()
+            drain(true)
+            copyAudio()
+        } catch (e: Exception) {
+            // The plugin has already forgotten this writer: free the codec and drop the broken file.
+            cancel()
+            throw e
+        }
         release()
     }
 
@@ -110,10 +136,13 @@ class FrameWriter(
     }
 
     private fun drain(endOfStream: Boolean) {
+        var idleSince = System.nanoTime()
         while (true) {
-            val index = codec.dequeueOutputBuffer(info, TIMEOUT_US)
+            // Don't wait between frames; only the final drain waits for output.
+            val index = codec.dequeueOutputBuffer(info, if (endOfStream) TIMEOUT_US else 0)
+            if (index != MediaCodec.INFO_TRY_AGAIN_LATER) idleSince = System.nanoTime()
             when {
-                index == MediaCodec.INFO_TRY_AGAIN_LATER -> if (!endOfStream) return
+                index == MediaCodec.INFO_TRY_AGAIN_LATER -> if (endOfStream) checkStall(idleSince) else return
                 index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     videoTrack = muxer.addTrack(codec.outputFormat)
                     muxer.start()
@@ -134,6 +163,10 @@ class FrameWriter(
         }
     }
 
+    private fun checkStall(since: Long) {
+        if ((System.nanoTime() - since) / 1_000_000 > STALL_MS) throw EncoderStalledException()
+    }
+
     private fun copyAudio() {
         val extractor = audioExtractor ?: return
         if (!muxerStarted) return
@@ -151,17 +184,22 @@ class FrameWriter(
     private fun release() {
         try { codec.stop() } catch (_: IllegalStateException) {}
         codec.release()
+        renderer?.release()
+        inputSurface.release()
         try { if (muxerStarted) muxer.stop() } catch (_: IllegalStateException) {}
         muxer.release()
         audioExtractor?.release()
     }
 
     companion object {
-        private const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
         private const val TIMEOUT_US = 10_000L
+        private const val STALL_MS = 5_000L
 
         /** ~0.2 bits per pixel per frame: good quality for flat pixel art. */
         fun defaultBitRate(width: Int, height: Int, frameRate: Double): Int =
             maxOf(1_000_000, (width.toLong() * height * frameRate * 0.2).toInt())
     }
 }
+
+/** The encoder stopped producing output; reported to Dart as `encoderStalled`. */
+class EncoderStalledException : IllegalStateException("video encoder stalled")
