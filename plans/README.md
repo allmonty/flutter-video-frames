@@ -15,6 +15,7 @@ Execution order (dependencies in brackets):
 9. #7 HDR input + HEVC output [after 1, 5]
 10. #8 Memory at 4K [after 1]
 11. #2, #4 — only if profiling after 1–10 shows they're the bottleneck
+12. #13 Publish to pub.dev — last [after all of the above; especially #3, which is breaking]
 
 API changes: #3 is **breaking** (`VideoFrames.api` splits in two). #6, #7 add optional parameters.
 Add CHANGELOG entries under an "Unreleased" heading as fixes land; when all fixes are in, bump `pubspec.yaml` to 1.1.0 and rename the heading to 1.1.0.
