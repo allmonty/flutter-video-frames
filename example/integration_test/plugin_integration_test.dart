@@ -320,6 +320,42 @@ void main() {
     await reader.close();
   });
 
+  testWidgets('seek moves nextFrame and leaves frameAt alone', (tester) async {
+    const width = 320, height = 240, frames = 30;
+    final path = '${Directory.systemTemp.path}/video_frames_seek.mp4';
+    final writer = await VideoWriter.create(path, width: width, height: height, frameRate: 30);
+    for (var i = 0; i < frames; i++) {
+      await writer.addFrame(syntheticFrame(width, height, i), Duration(microseconds: i * 33333));
+    }
+    await writer.finish();
+
+    final reader = await VideoReader.open(path);
+    try {
+      await reader.nextFrame(); // sequential position at frame 1
+      await reader.seek(const Duration(milliseconds: 500));
+      final pts = <int>[];
+      for (var f = await reader.nextFrame(); f != null; f = await reader.nextFrame()) {
+        pts.add(f.pts.inMicroseconds);
+      }
+      expect(pts.first, inInclusiveRange(500000 - 1000, 540000));
+      expect(pts.length, inInclusiveRange(14, 15));
+      for (var i = 1; i < pts.length; i++) {
+        expect(pts[i], greaterThan(pts[i - 1]));
+      }
+
+      final middle = await reader.frameAt(const Duration(milliseconds: 200));
+      expect(middle.pts.inMilliseconds, closeTo(200, 40));
+
+      await reader.seek(Duration.zero);
+      expect((await reader.nextFrame())!.pts, Duration.zero);
+
+      await reader.seek(const Duration(seconds: 5));
+      expect(await reader.nextFrame(), isNull);
+    } finally {
+      await reader.close();
+    }
+  });
+
   testWidgets('HEVC round trip (skipped without an HEVC encoder)', (tester) async {
     const width = 320, height = 240, frames = 10;
     final path = '${Directory.systemTemp.path}/video_frames_hevc.mp4';
