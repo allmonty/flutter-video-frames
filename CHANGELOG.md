@@ -1,5 +1,9 @@
 ## Unreleased
 
+- The example app now picks a video, applies a filter to every frame,
+  exports it with the original sound and plays it. CI runs on GitHub Actions.
+  The README has install steps, a before/after image, a comparison with
+  other options, and error-code and memory tables.
 - macOS support (12+). iOS and macOS share one Swift implementation
   (`sharedDarwinSource`), which moved from `ios/` to `darwin/`.
 - A writer whose `finish()` fails now frees the encoder and deletes the broken

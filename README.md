@@ -1,5 +1,8 @@
 # video_frames
 
+[![CI](https://github.com/allmonty/flutter-video-frames/actions/workflows/ci.yml/badge.svg)](https://github.com/allmonty/flutter-video-frames/actions/workflows/ci.yml)
+[![pub package](https://img.shields.io/pub/v/video_frames.svg)](https://pub.dev/packages/video_frames)
+
 A small Flutter plugin that takes a video apart into still pictures, and puts
 pictures back together into a video.
 
@@ -15,6 +18,15 @@ result, without bundling a heavy video library like FFmpeg.
 
 **Technically:** it decodes video files to RGBA frames and encodes RGBA frames
 to H.264 or HEVC in an MP4, using the phone's own hardware/system codecs (no FFmpeg).
+
+![A frame decoded by video_frames, then filtered to grayscale and inverted](https://raw.githubusercontent.com/allmonty/flutter-video-frames/main/doc/before_after.png)
+
+*A frame read back from a video the plugin wrote, as is, in grayscale and
+inverted: the two filters in the [example app](example/lib/main.dart).*
+
+```sh
+flutter pub add video_frames
+```
 
 ## Platforms
 
@@ -38,8 +50,21 @@ works from a background isolate, after calling
 `BackgroundIsolateBinaryMessenger.ensureInitialized`, so a whole
 decode → process → encode loop can run off the UI thread.
 
-It has no dependencies beyond Flutter and was written to be reusable outside
-Bitmapper.
+It has no dependencies beyond Flutter.
+
+## Compared to other options
+
+- **No FFmpeg.** It uses the codecs already on the device (MediaCodec,
+  AVFoundation), so it adds almost nothing to the app's size and brings no
+  GPL/LGPL licensing questions.
+- **Read and write in one package,** at the level of individual RGBA frames,
+  so any filter or effect written in Dart (or on the GPU, then read back)
+  can be applied to every frame.
+- **Audio is copied, not re-encoded,** so the sound keeps its quality and
+  costs no processing time.
+- **Not a player or an editor:** there's no timeline, trimming or
+  transitions. For playback use `video_player`; for general transcoding,
+  FFmpeg-based packages cover far more formats.
 
 ## Usage
 
