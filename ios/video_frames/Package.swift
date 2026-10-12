@@ -27,6 +27,7 @@ let package = Package(
                 // .process("PrivacyInfo.xcprivacy"),
             ],
             linkerSettings: [
+                .linkedFramework("Accelerate"),
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("CoreMedia"),
                 .linkedFramework("CoreVideo"),

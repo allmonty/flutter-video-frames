@@ -10,6 +10,11 @@
 - Readers and writers that are never closed are freed when garbage-collected
   (a forgotten writer is cancelled). iOS now frees everything when the
   Flutter engine shuts down, as Android already did.
+- Faster frame conversion. Android now decodes and encodes through OpenGL ES
+  (the GPU converts, rotates and scales), about 3x faster at 1080p on an
+  emulator; iOS uses Accelerate (vImage) for full-size frames.
+- Android: the first `frameAt` on a reader no longer sometimes fails with
+  "video decoder stalled".
 
 ## 0.3.0
 

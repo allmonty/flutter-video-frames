@@ -1,14 +1,14 @@
 package com.allmonty.video_frames
 
 import android.media.MediaCodec
-import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import java.nio.ByteBuffer
 
 /**
  * Decodes the video track of a file to RGBA frames, upright (rotation
- * metadata applied) and optionally scaled down. Uses the decoder's
- * `getOutputImage` (YUV_420_888), so no Surface or GL is needed.
+ * metadata applied) and optionally scaled down. The decoder renders to a
+ * GPU surface, and [GlRenderer] converts, rotates and scales each frame.
  *
  * Decoders are created lazily: one for sequential reading ([next]) and one
  * for seeking ([frameAt]), so scrubbing alone holds a single hardware
@@ -57,7 +57,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
         } finally {
             extractor.release()
         }
-        val (w, h) = ColorConversion.outputSize(srcWidth, srcHeight, rotation, maxDimension)
+        val (w, h) = FrameSize.outputSize(srcWidth, srcHeight, rotation, maxDimension)
         width = w
         height = h
     }
@@ -98,19 +98,28 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
         seeker = null
     }
 
-    /** One extractor + decoder pair over the video track. */
+    /** One extractor + decoder + GL renderer over the video track. */
     private inner class Decoder {
+        private val pixels = ByteBuffer.allocateDirect(width * height * 4)
+        private val renderer = GlRenderer.forDecoding(width, height)
         private val extractor = MediaExtractor()
-        private val codec: MediaCodec
+        private val codec: MediaCodec = try {
+            openCodec()
+        } catch (e: Exception) {
+            renderer.release()
+            extractor.release()
+            throw e
+        }
         private val info = MediaCodec.BufferInfo()
         private var inputDone = false
         private var outputDone = false
+        private var fed = false
 
         /** Presentation time of the last frame decoded (converted or not). */
         var lastPtsUs = -1L
             private set
 
-        init {
+        private fun openCodec(): MediaCodec {
             extractor.setDataSource(path)
             var track = -1
             for (i in 0 until extractor.trackCount) {
@@ -120,25 +129,27 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
             extractor.selectTrack(track)
             val format = extractor.getTrackFormat(track)
             val mime = format.getString(MediaFormat.KEY_MIME)!!
-            codec = MediaCodec.createDecoderByType(mime)
+            val codec = MediaCodec.createDecoderByType(mime)
             try {
+                // Rotation isn't passed on: the renderer applies it.
                 val config = MediaFormat.createVideoFormat(mime, format.getInteger(MediaFormat.KEY_WIDTH), format.getInteger(MediaFormat.KEY_HEIGHT))
                 for (key in listOf("csd-0", "csd-1", "csd-2")) {
                     if (format.containsKey(key)) config.setByteBuffer(key, format.getByteBuffer(key))
                 }
-                config.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-                codec.configure(config, null, null, 0)
+                codec.configure(config, renderer.surface, null, 0)
                 codec.start()
             } catch (e: Exception) {
                 codec.release()
-                extractor.release()
                 throw e
             }
+            return codec
         }
 
         fun seek(timeUs: Long) {
             extractor.seekTo(timeUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-            codec.flush()
+            // Flushing a surface decoder that has had no input can leave it never rendering.
+            if (fed) codec.flush()
+            fed = false
             inputDone = false
             outputDone = false
         }
@@ -156,6 +167,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
                     val inIndex = codec.dequeueInputBuffer(TIMEOUT_US)
                     if (inIndex >= 0) {
                         progressed = true
+                        fed = true
                         val buffer = codec.getInputBuffer(inIndex)!!
                         val size = extractor.readSampleData(buffer, 0)
                         if (size < 0) {
@@ -175,13 +187,11 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
                         val pts = info.presentationTimeUs
                         lastPtsUs = pts
                         if (pts >= minPtsUs) {
-                            try {
-                                return Pair(pts, convert(outIndex))
-                            } finally {
-                                codec.releaseOutputBuffer(outIndex, false)
-                            }
+                            codec.releaseOutputBuffer(outIndex, true)
+                            return Pair(pts, readRendered())
                         }
                     }
+                    // Frames before the target are dropped without rendering.
                     codec.releaseOutputBuffer(outIndex, false)
                 } else if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     progressed = true
@@ -203,27 +213,16 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
             return null
         }
 
-        private fun convert(index: Int): ByteArray {
-            val image = codec.getOutputImage(index)
-                ?: throw IllegalStateException("decoder gave no YUV image")
-            try {
-                val planes = image.planes
-                val crop = image.cropRect
-                return ColorConversion.yuvToRgba(
-                    ColorConversion.Plane(planes[0].buffer, planes[0].rowStride, planes[0].pixelStride),
-                    ColorConversion.Plane(planes[1].buffer, planes[1].rowStride, planes[1].pixelStride),
-                    ColorConversion.Plane(planes[2].buffer, planes[2].rowStride, planes[2].pixelStride),
-                    crop.left, crop.top, crop.width(), crop.height(),
-                    rotation, width, height,
-                )
-            } finally {
-                image.close()
-            }
+        private fun readRendered(): ByteArray {
+            renderer.use { readFrame(rotation, pixels) }
+            pixels.rewind()
+            return ByteArray(pixels.capacity()).also { pixels.get(it) }
         }
 
         fun release() {
             try { codec.stop() } catch (_: IllegalStateException) {}
             codec.release()
+            renderer.release()
             extractor.release()
         }
     }

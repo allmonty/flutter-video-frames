@@ -1,8 +1,8 @@
 // Round trip on a real device or emulator:
 //   flutter test integration_test/plugin_integration_test.dart
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:video_frames/video_frames.dart';
@@ -23,8 +23,82 @@ Uint8List syntheticFrame(int width, int height, int i) {
   return out;
 }
 
+/// Asserts the pixel at (x, y) is within 40 of `rgb` per channel (lossy codec).
+void expectPixel(VideoFrame f, int x, int y, (int, int, int) rgb, String where) {
+  final o = (y * f.width + x) * 4;
+  final (r, g, b) = rgb;
+  final got = (f.rgba[o], f.rgba[o + 1], f.rgba[o + 2]);
+  expect(
+    (got.$1 - r).abs() <= 40 && (got.$2 - g).abs() <= 40 && (got.$3 - b).abs() <= 40,
+    isTrue,
+    reason: '$where: expected $rgb, got $got',
+  );
+}
+
+/// The quadrant colors of the rotated fixture once upright (64x128).
+void expectUprightQuadrants(VideoFrame f) {
+  final (w, h) = (f.width, f.height);
+  expectPixel(f, w ~/ 4, h ~/ 4, (40, 40, 220), 'top-left blue');
+  expectPixel(f, w * 3 ~/ 4, h ~/ 4, (220, 40, 40), 'top-right red');
+  expectPixel(f, w ~/ 4, h * 3 ~/ 4, (220, 220, 220), 'bottom-left white');
+  expectPixel(f, w * 3 ~/ 4, h * 3 ~/ 4, (40, 220, 40), 'bottom-right green');
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('applies rotation metadata, scaled or not', (tester) async {
+    // 128x64, tagged 90°; see tool/make_rotated_fixture.swift.
+    final data = await rootBundle.load('integration_test/assets/rotated90.mp4');
+    final path = '${Directory.systemTemp.path}/video_frames_rotated90.mp4';
+    File(path).writeAsBytesSync(data.buffer.asUint8List());
+
+    final reader = await VideoReader.open(path);
+    expect(reader.info.rotationDegrees, 90);
+    expect((reader.info.width, reader.info.height), (64, 128));
+    expectUprightQuadrants((await reader.nextFrame())!);
+    // Scrub forward, back and forward again on the same reader.
+    for (final ms in [200, 33, 400, 100]) {
+      final f = await reader.frameAt(Duration(milliseconds: ms));
+      expect(f.pts.inMilliseconds, closeTo(ms, 34));
+      expectUprightQuadrants(f);
+    }
+    await reader.close();
+
+    final scaled = await VideoReader.open(path, maxDimension: 64);
+    expect((scaled.info.width, scaled.info.height), (32, 64));
+    expectUprightQuadrants((await scaled.nextFrame())!);
+    await scaled.close();
+  });
+
+  testWidgets('1080p speed (logged, not asserted)', (tester) async {
+    const width = 1920, height = 1080, frames = 60;
+    final path = '${Directory.systemTemp.path}/video_frames_1080p.mp4';
+    final input = [for (var i = 0; i < 4; i++) syntheticFrame(width, height, i)];
+
+    final encode = Stopwatch()..start();
+    final writer = await VideoWriter.create(path, width: width, height: height, frameRate: 30);
+    for (var i = 0; i < frames; i++) {
+      await writer.addFrame(input[i % 4], Duration(microseconds: i * 33333));
+    }
+    await writer.finish();
+    encode.stop();
+
+    final decode = Stopwatch()..start();
+    final reader = await VideoReader.open(path);
+    var count = 0;
+    while (await reader.nextFrame() != null) {
+      count++;
+    }
+    decode.stop();
+    await reader.close();
+    expect(count, frames);
+    // ignore: avoid_print
+    print(
+      '1080p: encode ${encode.elapsedMilliseconds ~/ frames} ms/frame, '
+      'decode ${decode.elapsedMilliseconds ~/ frames} ms/frame',
+    );
+  });
 
   testWidgets('encode 30 frames, then decode them back', (tester) async {
     const width = 320, height = 240, frames = 30;

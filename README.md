@@ -100,9 +100,9 @@ requested size.
 
 | | Android (minSdk 24) | iOS (15+) |
 |---|---|---|
-| Decode | `MediaExtractor` + `MediaCodec`, YUV via `getOutputImage`, converted and rotated in Kotlin | `AVAssetReader` (BGRA), converted and rotated in Swift |
+| Decode | `MediaExtractor` + `MediaCodec` into a `SurfaceTexture`; OpenGL ES converts, rotates and scales, then reads back RGBA | `AVAssetReader` (BGRA); rotated and converted with Accelerate (vImage) |
 | Seek (`frameAt`) | A second decoder: seek to the previous sync frame, then decode forward | `AVAssetImageGenerator` with zero tolerance |
-| Encode | `MediaCodec` AVC, YUV via `getInputImage`, explicit timestamps, `MediaMuxer` | `AVAssetWriter` + pixel-buffer adaptor |
+| Encode | RGBA drawn with OpenGL ES into the `MediaCodec` AVC input surface, explicit timestamps, `MediaMuxer` | `AVAssetWriter` + pixel-buffer adaptor, converted with vImage |
 | Audio | Samples copied through `MediaExtractor` → `MediaMuxer` | Passthrough `AVAssetReaderTrackOutput` → `AVAssetWriterInput` |
 
 On iOS the plugin supports both Swift Package Manager (`ios/video_frames/Package.swift`) and CocoaPods (`ios/video_frames.podspec`). The sources are in `ios/video_frames/Sources/video_frames/`. On Android it follows Flutter 3.47's plugin template: AGP 9, with the JVM target set through `kotlin { compilerOptions }`.
@@ -116,7 +116,7 @@ dart run pigeon --input pigeons/messages.dart
 ## Tests
 
 - `flutter test`: tests the Dart API against a fake host.
-- Kotlin conversion tests, from `example/android`:
+- Kotlin unit tests (frame size, rotation mapping), from `example/android`:
   `./gradlew :video_frames:testDebugUnitTest`. This needs a JDK 17–21,
   such as Android Studio's bundled one.
 - `tool/apple_check.sh`: runs the Swift reader and writer against real

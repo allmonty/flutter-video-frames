@@ -54,6 +54,10 @@ for y in 0..<2 { for x in 0..<4 { let i = (y * 4 + x) * 4; if x < 2 { bgra[i + 2
 let rot = bgra.withUnsafeBufferPointer { PixelConversion.bgraToRgba($0.baseAddress!, srcWidth: 4, srcHeight: 2, bytesPerRow: 16, rotation: 90, dstWidth: 2, dstHeight: 4) }
 check(rot[0] == 255 && rot[2] == 0, "rotate 90: top is red")
 check(rot[(3 * 2) * 4 + 2] == 255, "rotate 90: bottom is blue")
+let rot180 = bgra.withUnsafeBufferPointer { PixelConversion.bgraToRgba($0.baseAddress!, srcWidth: 4, srcHeight: 2, bytesPerRow: 16, rotation: 180, dstWidth: 4, dstHeight: 2) }
+check(rot180[2] == 255 && rot180[3 * 4] == 255, "rotate 180: left is blue, right is red")
+let rot270 = bgra.withUnsafeBufferPointer { PixelConversion.bgraToRgba($0.baseAddress!, srcWidth: 4, srcHeight: 2, bytesPerRow: 16, rotation: 270, dstWidth: 2, dstHeight: 4) }
+check(rot270[2] == 255 && rot270[(3 * 2) * 4] == 255, "rotate 270: top is blue, bottom is red")
 check(PixelConversion.rotationDegrees(a: 0, b: 1) == 90 && PixelConversion.rotationDegrees(a: -1, b: 0) == 180 && PixelConversion.rotationDegrees(a: 0, b: -1) == 270, "rotation from transform")
 
 let cancelPath = NSTemporaryDirectory() + "vf_cancel.mp4"

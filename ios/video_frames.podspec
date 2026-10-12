@@ -16,7 +16,7 @@ Frame-by-frame video decoding and encoding with AVFoundation.
   s.source_files = 'video_frames/Sources/video_frames/**/*.swift'
   s.dependency 'Flutter'
   s.platform = :ios, '15.0'
-  s.frameworks = 'AVFoundation', 'CoreMedia', 'CoreVideo'
+  s.frameworks = 'Accelerate', 'AVFoundation', 'CoreMedia', 'CoreVideo'
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
