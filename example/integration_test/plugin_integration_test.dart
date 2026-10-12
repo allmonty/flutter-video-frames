@@ -81,6 +81,56 @@ void main() {
     await scaled.close();
   });
 
+  testWidgets('scale filters: nearest, bilinear and area differ as expected', (tester) async {
+    // Vertical stripes with a 16-pixel period: columns 4-7 white, the rest black.
+    // Scaled 16x down, each output pixel covers one period, centered between
+    // columns 7 (white) and 8 (black): nearest picks one of them (0 or 255,
+    // never a blend), bilinear ~128, area ~64.
+    const width = 256, height = 64;
+    final frame = Uint8List(width * height * 4);
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        final v = (x % 16 >= 4 && x % 16 < 8) ? 255 : 0;
+        frame.fillRange((y * width + x) * 4, (y * width + x) * 4 + 3, v);
+        frame[(y * width + x) * 4 + 3] = 255;
+      }
+    }
+    final path = '${Directory.systemTemp.path}/video_frames_stripes.mp4';
+    final writer = await VideoWriter.create(
+      path,
+      width: width,
+      height: height,
+      frameRate: 30,
+      bitRate: 8000000,
+    );
+    for (var i = 0; i < 3; i++) {
+      await writer.addFrame(frame, Duration(microseconds: i * 33333));
+    }
+    await writer.finish();
+
+    for (final (filter, expected, tolerance) in [
+      (ScaleFilter.nearest, null, 40),
+      (ScaleFilter.bilinear, 128, 40),
+      (ScaleFilter.area, 64, 25),
+    ]) {
+      final reader = await VideoReader.open(path, maxDimension: 16, filter: filter);
+      expect((reader.info.width, reader.info.height), (16, 4));
+      final viaNext = (await reader.nextFrame())!;
+      final viaSeek = await reader.frameAt(Duration.zero);
+      await reader.close();
+      for (final f in [viaNext, viaSeek]) {
+        for (var x = 2; x < 14; x++) {
+          if (expected == null) {
+            final v = f.rgba[(2 * f.width + x) * 4];
+            expect(v <= tolerance || v >= 255 - tolerance, isTrue, reason: 'nearest at x=$x: $v');
+          } else {
+            expectPixel(f, x, 2, (expected, expected, expected), '${filter.name} x=$x', tolerance);
+          }
+        }
+      }
+    }
+  });
+
   testWidgets('HD colors match a BT.709 reference after a round trip', (tester) async {
     // The same four colors as colors709.mp4 (made by AVFoundation, tagged
     // BT.709). Comparing against how this device decodes that file isolates

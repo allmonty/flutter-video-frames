@@ -71,6 +71,15 @@ try {
 final still = await reader.frameAt(const Duration(seconds: 3));
 ```
 
+`maxDimension` scales frames down; pick how with `filter`:
+`ScaleFilter.nearest` (default, sharp, for pixel art), `ScaleFilter.bilinear`
+(smooth for small downscales) or `ScaleFilter.area` (averages every covered
+pixel, best for large downscales like 4K to 720p):
+
+```dart
+final reader = await VideoReader.open(path, maxDimension: 720, filter: ScaleFilter.area);
+```
+
 ## Audio
 
 `audioSourcePath` copies the source's audio track into the MP4 unchanged;

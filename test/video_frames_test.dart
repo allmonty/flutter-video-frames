@@ -11,8 +11,13 @@ class FakeHostApi extends VideoFramesHostApi {
   final writerSizes = <int, (int, int)>{};
 
   @override
-  Future<VideoInfoMessage> openReader(int readerId, String path, int? maxDimension) async {
-    calls.add('open $path $maxDimension');
+  Future<VideoInfoMessage> openReader(
+    int readerId,
+    String path,
+    int? maxDimension,
+    ScaleFilter filter,
+  ) async {
+    calls.add('open $path $maxDimension ${filter.name}');
     frames[readerId] = [
       for (var i = 0; i < 3; i++)
         VideoFrameMessage(ptsUs: i * 40000, width: 4, height: 2, rgba: Uint8List(32)..[0] = i),
@@ -79,7 +84,7 @@ void main() {
   group('VideoReader', () {
     test('open reports info', () async {
       final reader = await VideoReader.open('/v.mp4', maxDimension: 640);
-      expect(api.calls.single, 'open /v.mp4 640');
+      expect(api.calls.single, 'open /v.mp4 640 nearest');
       final info = reader.info;
       expect((info.width, info.height), (4, 2));
       expect(info.duration, const Duration(milliseconds: 120));
@@ -88,6 +93,11 @@ void main() {
       expect(info.hasAudio, isTrue);
       expect(info.audioCompatible, isFalse);
       expect(info.estimatedFrameCount, 3);
+    });
+
+    test('passes the scale filter', () async {
+      await VideoReader.open('/v.mp4', maxDimension: 320, filter: ScaleFilter.area);
+      expect(api.calls.single, 'open /v.mp4 320 area');
     });
 
     test('nextFrame walks frames in order, then returns null', () async {

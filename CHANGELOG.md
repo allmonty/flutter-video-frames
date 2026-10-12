@@ -17,6 +17,10 @@
   "video decoder stalled".
 - Written videos are tagged BT.709 (both platforms). Players no longer guess
   the color space, which shifted greens and skin tones in HD output.
+- `VideoReader.open(..., filter:)` chooses how `maxDimension` scales frames:
+  `ScaleFilter.nearest` (default), `bilinear` or `area`. `frameAt` now scales
+  exactly like `nextFrame` on iOS. Nearest sampling picks the pixel at each
+  output pixel's center on both platforms (iOS used to pick its top-left).
 
 ## 0.3.0
 

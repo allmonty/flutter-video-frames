@@ -66,16 +66,18 @@ final class FrameReader {
   private let output: AVAssetReaderTrackOutput
   private let srcWidth: Int
   private let srcHeight: Int
+  private let filter: PixelConversion.Filter
+  /// Full size, so frames are scaled with `filter` exactly like `next()`.
   private lazy var generator: AVAssetImageGenerator = {
     let generator = AVAssetImageGenerator(asset: asset)
     generator.appliesPreferredTrackTransform = true
     generator.requestedTimeToleranceBefore = .zero
     generator.requestedTimeToleranceAfter = .zero
-    generator.maximumSize = CGSize(width: width, height: height)
     return generator
   }()
 
-  init(path: String, maxDimension: Int?) throws {
+  init(path: String, maxDimension: Int?, filter: PixelConversion.Filter = .nearest) throws {
+    self.filter = filter
     asset = AVURLAsset(url: URL(fileURLWithPath: path))
     guard let track = asset.tracks(withMediaType: .video).first else {
       throw VideoFramesError.noVideoTrack(path)
@@ -121,20 +123,22 @@ final class FrameReader {
     var actual = CMTime.zero
     let image = try generator.copyCGImage(
       at: CMTime(value: timeUs, timescale: 1_000_000), actualTime: &actual)
-    var rgba = [UInt8](repeating: 0, count: width * height * 4)
-    let drawn = rgba.withUnsafeMutableBytes { buffer -> Bool in
+    // Draw the upright full-size frame as BGRA, then convert like next() (no rotation left).
+    let (w, h) = (image.width, image.height)
+    var bgra = [UInt8](repeating: 0, count: w * h * 4)
+    let rgba = try bgra.withUnsafeMutableBytes { buffer -> [UInt8] in
       guard
+        let base = buffer.baseAddress,
         let context = CGContext(
-          data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
-          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-          bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
-      else { return false }
-      context.interpolationQuality = .none
-      context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-      return true
+          data: base, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+          space: CGColorSpaceCreateDeviceRGB(),
+          bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue)
+      else { throw VideoFramesError.readFailed("cannot draw frame") }
+      context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+      return PixelConversion.bgraToRgba(
+        base.assumingMemoryBound(to: UInt8.self), srcWidth: w, srcHeight: h, bytesPerRow: w * 4,
+        rotation: 0, dstWidth: width, dstHeight: height, filter: filter)
     }
-    if !drawn { throw VideoFramesError.readFailed("cannot draw frame") }
-    for i in stride(from: 3, to: rgba.count, by: 4) { rgba[i] = 255 }
     return (Int64(CMTimeGetSeconds(actual) * 1_000_000), rgba)
   }
 
@@ -155,6 +159,7 @@ final class FrameReader {
       bytesPerRow: CVPixelBufferGetBytesPerRow(pixels),
       rotation: rotation,
       dstWidth: width,
-      dstHeight: height)
+      dstHeight: height,
+      filter: filter)
   }
 }

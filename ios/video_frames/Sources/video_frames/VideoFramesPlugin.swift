@@ -57,9 +57,13 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoFramesHostApi {
     }
   }
 
-  func openReader(readerId: Int64, path: String, maxDimension: Int64?) throws -> VideoInfoMessage {
+  func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter) throws
+    -> VideoInfoMessage
+  {
     try bridged {
-      let reader = try FrameReader(path: path, maxDimension: maxDimension.map { Int($0) })
+      let reader = try FrameReader(
+        path: path, maxDimension: maxDimension.map { Int($0) },
+        filter: PixelConversion.Filter(rawValue: filter.rawValue) ?? .nearest)
       lock.lock()
       readers[readerId] = reader
       lock.unlock()

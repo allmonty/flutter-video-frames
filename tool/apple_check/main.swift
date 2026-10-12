@@ -71,6 +71,26 @@ check(scaled.width == 160 && scaled.height == 120, "scaled \(scaled.width)x\(sca
 let sf = try scaled.next()!
 check(sf.rgba.count == 160 * 120 * 4, "scaled frame bytes")
 
+// Scale filters on 8x2 stripes (columns 0,255,0,0,0,255,0,0) down to 2x1: each filter gives a different value.
+let stripes = (0..<2).flatMap { _ in [0, 255, 0, 0, 0, 255, 0, 0].flatMap { v in [UInt8](repeating: UInt8(v), count: 4) } }
+func scaled(_ filter: PixelConversion.Filter) -> UInt8 {
+  var out = [UInt8](repeating: 0, count: 2 * 4)
+  stripes.withUnsafeBufferPointer { src in out.withUnsafeMutableBufferPointer { dst in
+    PixelConversion.scale(src.baseAddress!, srcWidth: 8, srcHeight: 2, bytesPerRow: 32, filter: filter, into: dst.baseAddress!, width: 2, height: 1)
+  } }
+  return out[0]
+}
+check(scaled(.nearest) == 0, "nearest samples the center pixel: \(scaled(.nearest))")
+check(scaled(.bilinear) == 128, "bilinear blends the two center pixels: \(scaled(.bilinear))")
+check(scaled(.area) == 64, "area averages the whole block: \(scaled(.area))")
+
+// frameAt (image generator) and next() (asset reader) filter the same way.
+let areaReader = try FrameReader(path: path, maxDimension: 160, filter: .area)
+let viaNext = try areaReader.next()!.rgba
+let viaSeek = try areaReader.frame(atUs: 0).rgba
+check(viaSeek.count == viaNext.count, "frameAt size matches next() with a filter")
+check(zip(viaNext, viaSeek).allSatisfy { abs(Int($0) - Int($1)) <= 10 }, "frameAt pixels match next() with area filtering")
+
 // Rotation mapping on a synthetic BGRA buffer: 4x2, left half red, right blue.
 var bgra = [UInt8](repeating: 0, count: 4 * 2 * 4)
 for y in 0..<2 { for x in 0..<4 { let i = (y * 4 + x) * 4; if x < 2 { bgra[i + 2] = 255 } else { bgra[i] = 255 }; bgra[i + 3] = 255 } }

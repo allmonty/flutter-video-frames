@@ -24,8 +24,8 @@ class VideoFramesPlugin : FlutterPlugin, VideoFramesHostApi {
     private fun reader(id: Long) = synchronized(this) { readers[id] } ?: throw IllegalArgumentException("unknown reader $id")
     private fun writer(id: Long) = synchronized(this) { writers[id] } ?: throw IllegalArgumentException("unknown writer $id")
 
-    override fun openReader(readerId: Long, path: String, maxDimension: Long?): VideoInfoMessage {
-        val reader = FrameReader(path, maxDimension?.toInt())
+    override fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter): VideoInfoMessage {
+        val reader = FrameReader(path, maxDimension?.toInt(), filter)
         synchronized(this) { readers[readerId] = reader }
         return VideoInfoMessage(
             width = reader.width.toLong(),

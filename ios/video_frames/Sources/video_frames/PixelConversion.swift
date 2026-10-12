@@ -29,9 +29,15 @@ enum PixelConversion {
     return ((degrees % 360) + 360) % 360
   }
 
+  /// Downscaling filters, in the order of the Dart `ScaleFilter` enum (the
+  /// plugin maps them by raw value; this file can't see the Pigeon types).
+  enum Filter: Int {
+    case nearest, bilinear, area
+  }
+
   /// BGRA (`bytesPerRow` may include padding) to a tightly packed RGBA frame
-  /// of `dstWidth x dstHeight`, rotated clockwise by `rotation` degrees,
-  /// with nearest-neighbour scaling.
+  /// of `dstWidth x dstHeight`, rotated clockwise by `rotation` degrees and
+  /// scaled down with `filter`.
   static func bgraToRgba(
     _ src: UnsafePointer<UInt8>,
     srcWidth: Int,
@@ -39,44 +45,109 @@ enum PixelConversion {
     bytesPerRow: Int,
     rotation: Int,
     dstWidth: Int,
-    dstHeight: Int
+    dstHeight: Int,
+    filter: Filter = .nearest
   ) -> [UInt8] {
     var out = [UInt8](repeating: 0, count: dstWidth * dstHeight * 4)
     let rotW = rotation % 180 == 0 ? srcWidth : srcHeight
     let rotH = rotation % 180 == 0 ? srcHeight : srcWidth
-    if rotW == dstWidth && rotH == dstHeight {
-      out.withUnsafeMutableBytes { dst in
+    out.withUnsafeMutableBytes { dst in
+      if rotW == dstWidth && rotH == dstHeight {
         rotateAndSwap(
           src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow,
           rotation: rotation, into: dst.baseAddress!, width: dstWidth, height: dstHeight)
+        return
       }
-      return out
+      // Scale first (at the unrotated size, so fewer pixels get rotated), then rotate.
+      let scaledW = rotation % 180 == 0 ? dstWidth : dstHeight
+      let scaledH = rotation % 180 == 0 ? dstHeight : dstWidth
+      var scaled = [UInt8](repeating: 0, count: scaledW * scaledH * 4)
+      scaled.withUnsafeMutableBufferPointer { buffer in
+        scale(
+          src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow, filter: filter,
+          into: buffer.baseAddress!, width: scaledW, height: scaledH)
+        rotateAndSwap(
+          buffer.baseAddress!, srcWidth: scaledW, srcHeight: scaledH, bytesPerRow: scaledW * 4,
+          rotation: rotation, into: dst.baseAddress!, width: dstWidth, height: dstHeight)
+      }
     }
-    out.withUnsafeMutableBufferPointer { dst in
-      var o = 0
-      for dy in 0..<dstHeight {
-        let ry = dy * rotH / dstHeight
-        for dx in 0..<dstWidth {
-          let rx = dx * rotW / dstWidth
-          // Undo the clockwise rotation to find the source pixel.
-          let sx: Int
-          let sy: Int
-          switch rotation {
-          case 90: sx = ry; sy = srcHeight - 1 - rx
-          case 180: sx = srcWidth - 1 - rx; sy = srcHeight - 1 - ry
-          case 270: sx = srcWidth - 1 - ry; sy = rx
-          default: sx = rx; sy = ry
+    return out
+  }
+
+  /// Scale 4-byte pixels (any channel order) down to a tightly packed
+  /// `width x height` buffer.
+  static func scale(
+    _ src: UnsafePointer<UInt8>,
+    srcWidth: Int,
+    srcHeight: Int,
+    bytesPerRow: Int,
+    filter: Filter,
+    into dst: UnsafeMutablePointer<UInt8>,
+    width: Int,
+    height: Int
+  ) {
+    switch filter {
+    case .nearest:
+      // Sample each output pixel's center, like GL_NEAREST on Android.
+      let xs = (0..<width).map { min(srcWidth - 1, (2 * $0 + 1) * srcWidth / (2 * width)) * 4 }
+      for y in 0..<height {
+        let row = src + min(srcHeight - 1, (2 * y + 1) * srcHeight / (2 * height)) * bytesPerRow
+        var o = y * width * 4
+        for x in xs {
+          for c in 0..<4 { dst[o + c] = row[x + c] }
+          o += 4
+        }
+      }
+    case .bilinear:
+      // Fixed-point weights out of 256, sampling at each output pixel's center.
+      func taps(_ dstLen: Int, _ srcLen: Int) -> [(Int, Int, Int)] {
+        (0..<dstLen).map { i in
+          let f = max(0, (Double(i) + 0.5) * Double(srcLen) / Double(dstLen) - 0.5)
+          let i0 = min(Int(f), srcLen - 1)
+          return (i0, min(i0 + 1, srcLen - 1), Int((f - Double(i0)) * 256))
+        }
+      }
+      let xs = taps(width, srcWidth)
+      for (y, (y0, y1, wy)) in taps(height, srcHeight).enumerated() {
+        let r0 = src + y0 * bytesPerRow
+        let r1 = src + y1 * bytesPerRow
+        var o = y * width * 4
+        for (x0, x1, wx) in xs {
+          for c in 0..<4 {
+            let top = Int(r0[x0 * 4 + c]) * (256 - wx) + Int(r0[x1 * 4 + c]) * wx
+            let bottom = Int(r1[x0 * 4 + c]) * (256 - wx) + Int(r1[x1 * 4 + c]) * wx
+            dst[o + c] = UInt8((top * (256 - wy) + bottom * wy + 32768) >> 16)
           }
-          let i = sy * bytesPerRow + sx * 4
-          dst[o] = src[i + 2]
-          dst[o + 1] = src[i + 1]
-          dst[o + 2] = src[i]
-          dst[o + 3] = 255
+          o += 4
+        }
+      }
+    case .area:
+      // Exact box average of the source pixels each output pixel covers.
+      func spans(_ dstLen: Int, _ srcLen: Int) -> [Range<Int>] {
+        (0..<dstLen).map { i in
+          let lo = i * srcLen / dstLen
+          return lo..<max(lo + 1, (i + 1) * srcLen / dstLen)
+        }
+      }
+      let xs = spans(width, srcWidth)
+      for (y, rows) in spans(height, srcHeight).enumerated() {
+        var o = y * width * 4
+        for cols in xs {
+          var sum = (0, 0, 0, 0)
+          for sy in rows {
+            let row = src + sy * bytesPerRow
+            for sx in cols {
+              sum.0 += Int(row[sx * 4]); sum.1 += Int(row[sx * 4 + 1])
+              sum.2 += Int(row[sx * 4 + 2]); sum.3 += Int(row[sx * 4 + 3])
+            }
+          }
+          let n = rows.count * cols.count
+          dst[o] = UInt8((sum.0 + n / 2) / n); dst[o + 1] = UInt8((sum.1 + n / 2) / n)
+          dst[o + 2] = UInt8((sum.2 + n / 2) / n); dst[o + 3] = UInt8((sum.3 + n / 2) / n)
           o += 4
         }
       }
     }
-    return out
   }
 
   /// Full-size path with Accelerate: rotate clockwise by `rotation`, then

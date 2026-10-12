@@ -11,6 +11,21 @@ import 'package:pigeon/pigeon.dart';
     dartPackageName: 'video_frames',
   ),
 )
+/// How frames are filtered when `maxDimension` scales them down.
+enum ScaleFilter {
+  /// Pick the source pixel at each output pixel's center: sharp, keeps hard
+  /// edges (pixel art), but aliases on photos.
+  nearest,
+
+  /// Blend the 2x2 source pixels around each output pixel's center: smooth
+  /// for downscales up to about 2x; larger ones alias again.
+  bilinear,
+
+  /// Average every source pixel an output pixel covers: smooth at any
+  /// downscale (e.g. 4K to 720p).
+  area,
+}
+
 class VideoInfoMessage {
   VideoInfoMessage({
     required this.width,
@@ -59,7 +74,7 @@ class VideoFrameMessage {
 @HostApi()
 abstract class VideoFramesHostApi {
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
-  VideoInfoMessage openReader(int readerId, String path, int? maxDimension);
+  VideoInfoMessage openReader(int readerId, String path, int? maxDimension, ScaleFilter filter);
 
   /// The next frame in presentation order, or null at the end.
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)

@@ -14,7 +14,7 @@ import java.nio.ByteBuffer
  * for seeking ([frameAt]), so scrubbing alone holds a single hardware
  * decoder.
  */
-class FrameReader(private val path: String, private val maxDimension: Int?) {
+class FrameReader(private val path: String, private val maxDimension: Int?, private val filter: ScaleFilter) {
     private var sequential: Decoder? = null
     private var seeker: Decoder? = null
 
@@ -62,6 +62,12 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
         height = h
     }
 
+    /** Area taps per axis: each bilinear tap covers 2 source pixels. */
+    private val areaTaps = minOf(
+        GlRenderer.MAX_AREA_TAPS,
+        Math.ceil(maxOf(srcWidth, srcHeight).toDouble() / maxOf(width, height) / 2).toInt(),
+    ).coerceAtLeast(1)
+
     /** The next frame in presentation order, or null at the end. */
     fun next(): Pair<Long, ByteArray>? {
         val decoder = sequential ?: Decoder().also { sequential = it }
@@ -101,7 +107,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?) {
     /** One extractor + decoder + GL renderer over the video track. */
     private inner class Decoder {
         private val pixels = ByteBuffer.allocateDirect(width * height * 4)
-        private val renderer = GlRenderer.forDecoding(width, height)
+        private val renderer = GlRenderer.forDecoding(width, height, filter, areaTaps, srcWidth, srcHeight)
         private val extractor = MediaExtractor()
         private val codec: MediaCodec = try {
             openCodec()

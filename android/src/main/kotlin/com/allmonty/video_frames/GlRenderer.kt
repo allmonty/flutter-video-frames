@@ -24,7 +24,15 @@ import java.nio.ByteOrder
  * A context is current on one thread at a time and Pigeon's serial queue may
  * switch threads, so every GL call goes through [use].
  */
-class GlRenderer private constructor(window: Surface?, private val width: Int, private val height: Int) {
+class GlRenderer private constructor(
+    window: Surface?,
+    private val width: Int,
+    private val height: Int,
+    private val filter: ScaleFilter = ScaleFilter.NEAREST,
+    private val taps: Int = 1,
+    private val srcWidth: Int = 0,
+    private val srcHeight: Int = 0,
+) {
     private val decoding = window == null
     private val display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
     private val context: android.opengl.EGLContext
@@ -78,8 +86,14 @@ class GlRenderer private constructor(window: Surface?, private val width: Int, p
     }
 
     private fun setUp() {
-        program = buildProgram(VERTEX_SHADER, if (decoding) FRAGMENT_EXTERNAL else FRAGMENT_2D)
-        texture = genTexture(target)
+        val fragment = when {
+            !decoding -> FRAGMENT_2D
+            filter == ScaleFilter.AREA -> FRAGMENT_EXTERNAL_AREA
+            filter == ScaleFilter.NEAREST -> FRAGMENT_EXTERNAL_NEAREST
+            else -> FRAGMENT_EXTERNAL
+        }
+        program = buildProgram(VERTEX_SHADER, fragment)
+        texture = genTexture(target, if (filter == ScaleFilter.NEAREST) GLES20.GL_NEAREST else GLES20.GL_LINEAR)
         if (decoding) {
             val st = SurfaceTexture(texture)
             st.setOnFrameAvailableListener({
@@ -90,7 +104,7 @@ class GlRenderer private constructor(window: Surface?, private val width: Int, p
             }, callbackHandler)
             surfaceTexture = st
             surface = Surface(st)
-            val output = genTexture(GLES20.GL_TEXTURE_2D)
+            val output = genTexture(GLES20.GL_TEXTURE_2D, GLES20.GL_NEAREST)
             GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
             val ids = IntArray(1)
             GLES20.glGenFramebuffers(1, ids, 0)
@@ -128,7 +142,13 @@ class GlRenderer private constructor(window: Surface?, private val width: Int, p
         st.updateTexImage()
         st.getTransformMatrix(texMatrix)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, framebuffer)
-        draw(decodeQuad(rotation))
+        val quad = decodeQuad(rotation)
+        if (filter == ScaleFilter.AREA) setAreaUniforms(quad)
+        if (filter == ScaleFilter.NEAREST) {
+            GLES20.glUseProgram(program)
+            GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "uSrcSize"), srcWidth.toFloat(), srcHeight.toFloat())
+        }
+        draw(quad)
         out.clear()
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, out)
         checkGl("readPixels")
@@ -152,6 +172,20 @@ class GlRenderer private constructor(window: Surface?, private val width: Int, p
         surface?.release()
         EGL14.eglDestroySurface(display, eglSurface)
         EGL14.eglDestroyContext(display, context)
+    }
+
+    /** Texture-space step of one output pixel along x and y, and the tap count per axis. */
+    private fun setAreaUniforms(quad: FloatArray) {
+        // Corners 0, 1, 2 are top-left, top-right, bottom-left; uv is at 2..3 of each.
+        val stepX = floatArrayOf((quad[6] - quad[2]) / width, (quad[7] - quad[3]) / width, 0f, 0f)
+        val stepY = floatArrayOf((quad[10] - quad[2]) / height, (quad[11] - quad[3]) / height, 0f, 0f)
+        val out = FloatArray(4)
+        GLES20.glUseProgram(program)
+        android.opengl.Matrix.multiplyMV(out, 0, texMatrix, 0, stepX, 0)
+        GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "uStepX"), out[0], out[1])
+        android.opengl.Matrix.multiplyMV(out, 0, texMatrix, 0, stepY, 0)
+        GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "uStepY"), out[0], out[1])
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uTaps"), taps.toFloat())
     }
 
     private fun awaitFrame() {
@@ -186,12 +220,12 @@ class GlRenderer private constructor(window: Surface?, private val width: Int, p
         checkGl("draw")
     }
 
-    private fun genTexture(target: Int): Int {
+    private fun genTexture(target: Int, sampling: Int): Int {
         val ids = IntArray(1)
         GLES20.glGenTextures(1, ids, 0)
         GLES20.glBindTexture(target, ids[0])
-        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
-        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
+        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_MIN_FILTER, sampling)
+        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_MAG_FILTER, sampling)
         GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         return ids[0]
@@ -228,7 +262,11 @@ class GlRenderer private constructor(window: Surface?, private val width: Int, p
         /** Frame-available callbacks need a Looper; Pigeon's queue threads have none. */
         private val callbackHandler by lazy { Handler(HandlerThread("video_frames").apply { start() }.looper) }
 
-        fun forDecoding(width: Int, height: Int) = GlRenderer(null, width, height)
+        /** Area filtering averages up to this many bilinear taps per axis, covering 2 texels each. */
+        const val MAX_AREA_TAPS = 8
+
+        fun forDecoding(width: Int, height: Int, filter: ScaleFilter, taps: Int, srcWidth: Int, srcHeight: Int) =
+            GlRenderer(null, width, height, filter, taps, srcWidth, srcHeight)
 
         fun forEncoding(input: Surface, width: Int, height: Int) = GlRenderer(input, width, height)
 
@@ -270,9 +308,11 @@ class GlRenderer private constructor(window: Surface?, private val width: Int, p
             attribute vec2 aUv;
             uniform mat4 uTexMatrix;
             varying highp vec2 vUv;
+            varying highp vec2 vRawUv;
             void main() {
                 gl_Position = vec4(aPos, 0.0, 1.0);
                 vUv = (uTexMatrix * vec4(aUv, 0.0, 1.0)).xy;
+                vRawUv = aUv;
             }
         """
 
@@ -282,6 +322,45 @@ class GlRenderer private constructor(window: Surface?, private val width: Int, p
             varying highp vec2 vUv;
             uniform samplerExternalOES uTex;
             void main() { gl_FragColor = vec4(texture2D(uTex, vUv).rgb, 1.0); }
+        """
+
+        // Snaps to the source pixel's center before the texture transform, so the
+        // result is one source pixel even where GL_NEAREST is ignored on external
+        // textures (the Android emulator blends anyway).
+        private const val FRAGMENT_EXTERNAL_NEAREST = """
+            #extension GL_OES_EGL_image_external : require
+            precision highp float;
+            varying highp vec2 vRawUv;
+            uniform samplerExternalOES uTex;
+            uniform mat4 uTexMatrix;
+            uniform vec2 uSrcSize;
+            void main() {
+                vec2 center = (floor(vRawUv * uSrcSize) + 0.5) / uSrcSize;
+                gl_FragColor = vec4(texture2D(uTex, (uTexMatrix * vec4(center, 0.0, 1.0)).xy).rgb, 1.0);
+            }
+        """
+
+        // shortcut: exact up to a 16x downscale (8 taps x 2 texels); beyond that it skips texels. Add a pre-pass if needed.
+        private const val FRAGMENT_EXTERNAL_AREA = """
+            #extension GL_OES_EGL_image_external : require
+            precision highp float;
+            varying highp vec2 vUv;
+            uniform samplerExternalOES uTex;
+            uniform vec2 uStepX;
+            uniform vec2 uStepY;
+            uniform float uTaps;
+            void main() {
+                vec3 sum = vec3(0.0);
+                for (int i = 0; i < $MAX_AREA_TAPS; i++) {
+                    if (float(i) >= uTaps) break;
+                    for (int j = 0; j < $MAX_AREA_TAPS; j++) {
+                        if (float(j) >= uTaps) break;
+                        vec2 o = (vec2(float(i), float(j)) + 0.5) / uTaps - 0.5;
+                        sum += texture2D(uTex, vUv + o.x * uStepX + o.y * uStepY).rgb;
+                    }
+                }
+                gl_FragColor = vec4(sum / (uTaps * uTaps), 1.0);
+            }
         """
 
         private const val FRAGMENT_2D = """

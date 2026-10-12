@@ -10,7 +10,8 @@ import 'dart:typed_data';
 
 import 'src/messages.g.dart';
 
-export 'src/messages.g.dart' show VideoFrameMessage, VideoFramesHostApi, VideoInfoMessage;
+export 'src/messages.g.dart'
+    show ScaleFilter, VideoFrameMessage, VideoFramesHostApi, VideoInfoMessage;
 
 /// Metadata of an opened video.
 class VideoInfo {
@@ -83,10 +84,17 @@ class VideoReader {
   bool _closed = false;
 
   /// Open `path`. With `maxDimension`, frames are scaled down (keeping the
-  /// aspect ratio) so neither edge exceeds it.
-  static Future<VideoReader> open(String path, {int? maxDimension}) async {
+  /// aspect ratio) so neither edge exceeds it, using `filter`: the default
+  /// [ScaleFilter.nearest] suits pixel art, [ScaleFilter.bilinear] small
+  /// downscales and [ScaleFilter.area] large ones. Applies to [nextFrame]
+  /// and [frameAt].
+  static Future<VideoReader> open(
+    String path, {
+    int? maxDimension,
+    ScaleFilter filter = ScaleFilter.nearest,
+  }) async {
     final id = VideoFrames._id();
-    final m = await VideoFrames.api.openReader(id, path, maxDimension);
+    final m = await VideoFrames.api.openReader(id, path, maxDimension, filter);
     return VideoReader._(
       id,
       VideoInfo(
