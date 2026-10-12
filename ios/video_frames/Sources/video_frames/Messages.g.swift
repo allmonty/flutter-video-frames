@@ -367,12 +367,10 @@ class MessagesPigeonCodec: FlutterStandardMessageCodec, @unchecked Sendable {
   static let shared = MessagesPigeonCodec(readerWriter: MessagesPigeonCodecReaderWriter())
 }
 
-/// Every call runs on a serial background queue on the platform side, so
-/// decoding and encoding never block the platform's main thread. Readers and
-/// writers are addressed by ids chosen on the Dart side.
+/// Decoding, on its own serial background queue.
 ///
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
-protocol VideoFramesHostApi {
+protocol VideoReaderHostApi {
   func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter) throws -> VideoInfoMessage
   /// The next frame in presentation order, or null at the end.
   func nextFrame(readerId: Int64) throws -> VideoFrameMessage?
@@ -380,21 +378,13 @@ protocol VideoFramesHostApi {
   /// sequential position used by [nextFrame].
   func frameAt(readerId: Int64, timeUs: Int64) throws -> VideoFrameMessage
   func closeReader(readerId: Int64) throws
-  /// Returns whether the audio of `audioSourcePath` will be copied; audio
-  /// that can't go into an MP4 unchanged is dropped instead of failing.
-  func openWriter(writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?, audioSourcePath: String?) throws -> Bool
-  func addFrame(writerId: Int64, rgba: FlutterStandardTypedData, ptsUs: Int64) throws
-  /// Flush, copy the audio track (if any) and close the file.
-  func finishWriter(writerId: Int64) throws
-  /// Stop and delete the partial file.
-  func cancelWriter(writerId: Int64) throws
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
-class VideoFramesHostApiSetup {
+class VideoReaderHostApiSetup {
   static var codec: FlutterStandardMessageCodec { MessagesPigeonCodec.shared }
-  /// Sets up an instance of `VideoFramesHostApi` to handle messages through the `binaryMessenger`.
-  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: VideoFramesHostApi?, messageChannelSuffix: String = "") {
+  /// Sets up an instance of `VideoReaderHostApi` to handle messages through the `binaryMessenger`.
+  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: VideoReaderHostApi?, messageChannelSuffix: String = "") {
     let channelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
     #if os(iOS)
       let taskQueue = binaryMessenger.makeBackgroundTaskQueue?()
@@ -402,8 +392,8 @@ class VideoFramesHostApiSetup {
       let taskQueue: FlutterTaskQueue? = nil
     #endif
     let openReaderChannel = taskQueue == nil
-      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.openReader\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.openReader\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.openReader\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.openReader\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
     if let api = api {
       openReaderChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -423,8 +413,8 @@ class VideoFramesHostApiSetup {
     }
     /// The next frame in presentation order, or null at the end.
     let nextFrameChannel = taskQueue == nil
-      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.nextFrame\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.nextFrame\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.nextFrame\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.nextFrame\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
     if let api = api {
       nextFrameChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -442,8 +432,8 @@ class VideoFramesHostApiSetup {
     /// The frame closest to `timeUs`, for scrubbing. Doesn't move the
     /// sequential position used by [nextFrame].
     let frameAtChannel = taskQueue == nil
-      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.frameAt\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.frameAt\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.frameAt\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.frameAt\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
     if let api = api {
       frameAtChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -460,8 +450,8 @@ class VideoFramesHostApiSetup {
       frameAtChannel.setMessageHandler(nil)
     }
     let closeReaderChannel = taskQueue == nil
-      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.closeReader\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.closeReader\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.closeReader\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoReaderHostApi.closeReader\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
     if let api = api {
       closeReaderChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -476,11 +466,38 @@ class VideoFramesHostApiSetup {
     } else {
       closeReaderChannel.setMessageHandler(nil)
     }
+  }
+}
+/// Encoding, on its own serial background queue.
+///
+/// Generated protocol from Pigeon that represents a handler of messages from Flutter.
+protocol VideoWriterHostApi {
+  /// Returns whether the audio of `audioSourcePath` will be copied; audio
+  /// that can't go into an MP4 unchanged is dropped instead of failing.
+  func openWriter(writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?, audioSourcePath: String?) throws -> Bool
+  func addFrame(writerId: Int64, rgba: FlutterStandardTypedData, ptsUs: Int64) throws
+  /// Flush, copy the audio track (if any) and close the file.
+  func finishWriter(writerId: Int64) throws
+  /// Stop and delete the partial file.
+  func cancelWriter(writerId: Int64) throws
+}
+
+/// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
+class VideoWriterHostApiSetup {
+  static var codec: FlutterStandardMessageCodec { MessagesPigeonCodec.shared }
+  /// Sets up an instance of `VideoWriterHostApi` to handle messages through the `binaryMessenger`.
+  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: VideoWriterHostApi?, messageChannelSuffix: String = "") {
+    let channelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
+    #if os(iOS)
+      let taskQueue = binaryMessenger.makeBackgroundTaskQueue?()
+    #else
+      let taskQueue: FlutterTaskQueue? = nil
+    #endif
     /// Returns whether the audio of `audioSourcePath` will be copied; audio
     /// that can't go into an MP4 unchanged is dropped instead of failing.
     let openWriterChannel = taskQueue == nil
-      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.openWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.openWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.openWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.openWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
     if let api = api {
       openWriterChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -502,8 +519,8 @@ class VideoFramesHostApiSetup {
       openWriterChannel.setMessageHandler(nil)
     }
     let addFrameChannel = taskQueue == nil
-      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.addFrame\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.addFrame\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.addFrame\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.addFrame\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
     if let api = api {
       addFrameChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -522,8 +539,8 @@ class VideoFramesHostApiSetup {
     }
     /// Flush, copy the audio track (if any) and close the file.
     let finishWriterChannel = taskQueue == nil
-      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.finishWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.finishWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.finishWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.finishWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
     if let api = api {
       finishWriterChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -540,8 +557,8 @@ class VideoFramesHostApiSetup {
     }
     /// Stop and delete the partial file.
     let cancelWriterChannel = taskQueue == nil
-      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.cancelWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoFramesHostApi.cancelWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.cancelWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.cancelWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
     if let api = api {
       cancelWriterChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]

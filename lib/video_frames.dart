@@ -11,7 +11,7 @@ import 'dart:typed_data';
 import 'src/messages.g.dart';
 
 export 'src/messages.g.dart'
-    show ScaleFilter, VideoFrameMessage, VideoFramesHostApi, VideoInfoMessage;
+    show ScaleFilter, VideoFrameMessage, VideoInfoMessage, VideoReaderHostApi, VideoWriterHostApi;
 
 /// Metadata of an opened video.
 class VideoInfo {
@@ -61,8 +61,12 @@ class VideoFrame {
 
 /// Entry point: holds the host API (swappable in tests).
 abstract final class VideoFrames {
-  /// The platform API; replace it with a fake in tests.
-  static VideoFramesHostApi api = VideoFramesHostApi();
+  /// The platform decoding API; replace it with a fake in tests.
+  static VideoReaderHostApi readerApi = VideoReaderHostApi();
+
+  /// The platform encoding API (a separate queue from [readerApi], so
+  /// decoding and encoding can overlap); replace it with a fake in tests.
+  static VideoWriterHostApi writerApi = VideoWriterHostApi();
   static int _nextId = 1;
 
   static int _id() => _nextId++;
@@ -77,7 +81,7 @@ class VideoReader {
 
   // A safety net for readers that are never closed; finalizers aren't
   // guaranteed to run, so it doesn't replace [close].
-  static final _finalizer = Finalizer<int>((id) => VideoFrames.api.closeReader(id).ignore());
+  static final _finalizer = Finalizer<int>((id) => VideoFrames.readerApi.closeReader(id).ignore());
 
   final int _id;
   final VideoInfo info;
@@ -94,7 +98,7 @@ class VideoReader {
     ScaleFilter filter = ScaleFilter.nearest,
   }) async {
     final id = VideoFrames._id();
-    final m = await VideoFrames.api.openReader(id, path, maxDimension, filter);
+    final m = await VideoFrames.readerApi.openReader(id, path, maxDimension, filter);
     return VideoReader._(
       id,
       VideoInfo(
@@ -112,7 +116,7 @@ class VideoReader {
   /// The next frame in presentation order, or null at the end.
   Future<VideoFrame?> nextFrame() async {
     _checkOpen();
-    final m = await VideoFrames.api.nextFrame(_id);
+    final m = await VideoFrames.readerApi.nextFrame(_id);
     return m == null ? null : _frame(m);
   }
 
@@ -120,14 +124,14 @@ class VideoReader {
   /// [nextFrame]'s position.
   Future<VideoFrame> frameAt(Duration time) async {
     _checkOpen();
-    return _frame(await VideoFrames.api.frameAt(_id, time.inMicroseconds));
+    return _frame(await VideoFrames.readerApi.frameAt(_id, time.inMicroseconds));
   }
 
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
     _finalizer.detach(this);
-    await VideoFrames.api.closeReader(_id);
+    await VideoFrames.readerApi.closeReader(_id);
   }
 
   void _checkOpen() {
@@ -158,7 +162,7 @@ class VideoWriter {
 
   // A safety net for abandoned writers: the file is unfinished, so cancel
   // (delete) it. Finalizers aren't guaranteed to run.
-  static final _finalizer = Finalizer<int>((id) => VideoFrames.api.cancelWriter(id).ignore());
+  static final _finalizer = Finalizer<int>((id) => VideoFrames.writerApi.cancelWriter(id).ignore());
 
   final int _id;
 
@@ -188,7 +192,7 @@ class VideoWriter {
     final w = width & ~1, h = height & ~1;
     if (w < 2 || h < 2) throw ArgumentError('video must be at least 2x2, got ${width}x$height');
     final id = VideoFrames._id();
-    final audio = await VideoFrames.api.openWriter(
+    final audio = await VideoFrames.writerApi.openWriter(
       id,
       path,
       w,
@@ -204,14 +208,14 @@ class VideoWriter {
   /// size before even-rounding) shown at `pts`.
   Future<void> addFrame(Uint8List rgba, Duration pts) {
     _checkOpen();
-    return VideoFrames.api.addFrame(_id, _fit(rgba), pts.inMicroseconds);
+    return VideoFrames.writerApi.addFrame(_id, _fit(rgba), pts.inMicroseconds);
   }
 
   Future<void> finish() {
     _checkOpen();
     _done = true;
     _finalizer.detach(this);
-    return VideoFrames.api.finishWriter(_id);
+    return VideoFrames.writerApi.finishWriter(_id);
   }
 
   /// Stop and delete the partial file.
@@ -219,7 +223,7 @@ class VideoWriter {
     if (_done) return;
     _done = true;
     _finalizer.detach(this);
-    await VideoFrames.api.cancelWriter(_id);
+    await VideoFrames.writerApi.cancelWriter(_id);
   }
 
   Uint8List _fit(Uint8List rgba) {

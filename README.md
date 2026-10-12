@@ -64,6 +64,14 @@ try {
   await reader.close();
 }
 
+// Decoding and encoding run on separate native queues. To overlap them,
+// request the next frame before awaiting the current one's encode:
+//   var next = reader.nextFrame();
+//   for (var f = await next; f != null; f = await next) {
+//     next = reader.nextFrame();               // decode n+1 ...
+//     await writer.addFrame(process(f.rgba), f.pts); // ... while encoding n
+//   }
+
 // Readers and writers hold hardware codecs, so always close them as above.
 // A forgotten one is freed when it's garbage-collected, but that may be late.
 

@@ -202,10 +202,45 @@ void main() {
     decode.stop();
     await reader.close();
     expect(count, frames);
+
+    // Transcode: one call at a time, then pipelined so decoding frame n+1
+    // overlaps encoding frame n (readers and writers have separate queues).
+    Future<int> transcode({required bool pipelined}) async {
+      final reader = await VideoReader.open(path);
+      final writer = await VideoWriter.create(
+        '${Directory.systemTemp.path}/video_frames_transcoded.mp4',
+        width: width,
+        height: height,
+        frameRate: 30,
+      );
+      final watch = Stopwatch()..start();
+      var written = 0;
+      if (pipelined) {
+        var next = reader.nextFrame();
+        for (var f = await next; f != null; f = await next) {
+          next = reader.nextFrame();
+          await writer.addFrame(f.rgba, f.pts);
+          written++;
+        }
+      } else {
+        for (VideoFrame? f; (f = await reader.nextFrame()) != null;) {
+          await writer.addFrame(f!.rgba, f.pts);
+          written++;
+        }
+      }
+      await writer.finish();
+      await reader.close();
+      expect(written, frames);
+      return watch.elapsedMilliseconds ~/ frames;
+    }
+
+    final sequential = await transcode(pipelined: false);
+    final pipelined = await transcode(pipelined: true);
     // ignore: avoid_print
     print(
       '1080p: encode ${encode.elapsedMilliseconds ~/ frames} ms/frame, '
-      'decode ${decode.elapsedMilliseconds ~/ frames} ms/frame',
+      'decode ${decode.elapsedMilliseconds ~/ frames} ms/frame, '
+      'transcode $sequential ms/frame sequential, $pipelined ms/frame pipelined',
     );
   });
 

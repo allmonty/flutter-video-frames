@@ -374,13 +374,11 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
 }
 
 /**
- * Every call runs on a serial background queue on the platform side, so
- * decoding and encoding never block the platform's main thread. Readers and
- * writers are addressed by ids chosen on the Dart side.
+ * Decoding, on its own serial background queue.
  *
  * Generated interface from Pigeon that represents a handler of messages from Flutter.
  */
-interface VideoFramesHostApi {
+interface VideoReaderHostApi {
   fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter): VideoInfoMessage
   /** The next frame in presentation order, or null at the end. */
   fun nextFrame(readerId: Long): VideoFrameMessage?
@@ -390,29 +388,19 @@ interface VideoFramesHostApi {
    */
   fun frameAt(readerId: Long, timeUs: Long): VideoFrameMessage
   fun closeReader(readerId: Long)
-  /**
-   * Returns whether the audio of `audioSourcePath` will be copied; audio
-   * that can't go into an MP4 unchanged is dropped instead of failing.
-   */
-  fun openWriter(writerId: Long, path: String, width: Long, height: Long, frameRate: Double, bitRate: Long?, audioSourcePath: String?): Boolean
-  fun addFrame(writerId: Long, rgba: ByteArray, ptsUs: Long)
-  /** Flush, copy the audio track (if any) and close the file. */
-  fun finishWriter(writerId: Long)
-  /** Stop and delete the partial file. */
-  fun cancelWriter(writerId: Long)
 
   companion object {
-    /** The codec used by VideoFramesHostApi. */
+    /** The codec used by VideoReaderHostApi. */
     val codec: MessageCodec<Any?> by lazy {
       MessagesPigeonCodec()
     }
-    /** Sets up an instance of `VideoFramesHostApi` to handle messages through the `binaryMessenger`. */
+    /** Sets up an instance of `VideoReaderHostApi` to handle messages through the `binaryMessenger`. */
     @JvmOverloads
-    fun setUp(binaryMessenger: BinaryMessenger, api: VideoFramesHostApi?, messageChannelSuffix: String = "") {
+    fun setUp(binaryMessenger: BinaryMessenger, api: VideoReaderHostApi?, messageChannelSuffix: String = "") {
       val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
       val taskQueue = binaryMessenger.makeBackgroundTaskQueue()
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoFramesHostApi.openReader$separatedMessageChannelSuffix", codec, taskQueue)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoReaderHostApi.openReader$separatedMessageChannelSuffix", codec, taskQueue)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
@@ -432,7 +420,7 @@ interface VideoFramesHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoFramesHostApi.nextFrame$separatedMessageChannelSuffix", codec, taskQueue)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoReaderHostApi.nextFrame$separatedMessageChannelSuffix", codec, taskQueue)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
@@ -449,7 +437,7 @@ interface VideoFramesHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoFramesHostApi.frameAt$separatedMessageChannelSuffix", codec, taskQueue)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoReaderHostApi.frameAt$separatedMessageChannelSuffix", codec, taskQueue)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
@@ -467,7 +455,7 @@ interface VideoFramesHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoFramesHostApi.closeReader$separatedMessageChannelSuffix", codec, taskQueue)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoReaderHostApi.closeReader$separatedMessageChannelSuffix", codec, taskQueue)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
@@ -484,8 +472,38 @@ interface VideoFramesHostApi {
           channel.setMessageHandler(null)
         }
       }
+    }
+  }
+}
+/**
+ * Encoding, on its own serial background queue.
+ *
+ * Generated interface from Pigeon that represents a handler of messages from Flutter.
+ */
+interface VideoWriterHostApi {
+  /**
+   * Returns whether the audio of `audioSourcePath` will be copied; audio
+   * that can't go into an MP4 unchanged is dropped instead of failing.
+   */
+  fun openWriter(writerId: Long, path: String, width: Long, height: Long, frameRate: Double, bitRate: Long?, audioSourcePath: String?): Boolean
+  fun addFrame(writerId: Long, rgba: ByteArray, ptsUs: Long)
+  /** Flush, copy the audio track (if any) and close the file. */
+  fun finishWriter(writerId: Long)
+  /** Stop and delete the partial file. */
+  fun cancelWriter(writerId: Long)
+
+  companion object {
+    /** The codec used by VideoWriterHostApi. */
+    val codec: MessageCodec<Any?> by lazy {
+      MessagesPigeonCodec()
+    }
+    /** Sets up an instance of `VideoWriterHostApi` to handle messages through the `binaryMessenger`. */
+    @JvmOverloads
+    fun setUp(binaryMessenger: BinaryMessenger, api: VideoWriterHostApi?, messageChannelSuffix: String = "") {
+      val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+      val taskQueue = binaryMessenger.makeBackgroundTaskQueue()
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoFramesHostApi.openWriter$separatedMessageChannelSuffix", codec, taskQueue)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoWriterHostApi.openWriter$separatedMessageChannelSuffix", codec, taskQueue)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
@@ -508,7 +526,7 @@ interface VideoFramesHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoFramesHostApi.addFrame$separatedMessageChannelSuffix", codec, taskQueue)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoWriterHostApi.addFrame$separatedMessageChannelSuffix", codec, taskQueue)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
@@ -528,7 +546,7 @@ interface VideoFramesHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoFramesHostApi.finishWriter$separatedMessageChannelSuffix", codec, taskQueue)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoWriterHostApi.finishWriter$separatedMessageChannelSuffix", codec, taskQueue)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
@@ -546,7 +564,7 @@ interface VideoFramesHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoFramesHostApi.cancelWriter$separatedMessageChannelSuffix", codec, taskQueue)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoWriterHostApi.cancelWriter$separatedMessageChannelSuffix", codec, taskQueue)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>

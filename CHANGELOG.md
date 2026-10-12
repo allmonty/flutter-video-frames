@@ -21,6 +21,11 @@
   `ScaleFilter.nearest` (default), `bilinear` or `area`. `frameAt` now scales
   exactly like `nextFrame` on iOS. Nearest sampling picks the pixel at each
   output pixel's center on both platforms (iOS used to pick its top-left).
+- **Breaking:** the host API is split into `VideoReaderHostApi` and
+  `VideoWriterHostApi`, each on its own native queue, so decoding can overlap
+  encoding (see the pipelined loop in the README). The test seam
+  `VideoFrames.api` is replaced by `VideoFrames.readerApi` and
+  `VideoFrames.writerApi`.
 
 ## 0.3.0
 

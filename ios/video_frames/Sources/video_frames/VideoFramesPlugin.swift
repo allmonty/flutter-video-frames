@@ -1,23 +1,26 @@
 import Flutter
 import UIKit
 
-/// Routes the Pigeon host API to `FrameReader`s and `FrameWriter`s by id.
-/// Pigeon runs every call on a serial background queue.
-public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoFramesHostApi {
+/// Routes the Pigeon host APIs to `FrameReader`s and `FrameWriter`s by id.
+/// Pigeon runs reader calls and writer calls on two separate serial
+/// background queues.
+public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi {
   private var readers: [Int64: FrameReader] = [:]
   private var writers: [Int64: FrameWriter] = [:]
   private let lock = NSLock()
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let instance = VideoFramesPlugin()
-    VideoFramesHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: instance)
+    VideoReaderHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: instance)
+    VideoWriterHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: instance)
     // Published so the engine calls detachFromEngine(for:) on shutdown.
     registrar.publish(instance)
   }
 
   /// Free every decoder and encoder still open when the engine goes away.
   public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
-    VideoFramesHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: nil)
+    VideoReaderHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: nil)
+    VideoWriterHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: nil)
     lock.lock()
     let openReaders = readers.values
     let openWriters = writers.values

@@ -2,17 +2,22 @@ package com.allmonty.video_frames
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 
-/** Routes the Pigeon host API to [FrameReader]s and [FrameWriter]s by id. */
-class VideoFramesPlugin : FlutterPlugin, VideoFramesHostApi {
+/**
+ * Routes the Pigeon host APIs to [FrameReader]s and [FrameWriter]s by id.
+ * Readers and writers run on two separate background queues.
+ */
+class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi {
     private val readers = HashMap<Long, FrameReader>()
     private val writers = HashMap<Long, FrameWriter>()
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        VideoFramesHostApi.setUp(binding.binaryMessenger, this)
+        VideoReaderHostApi.setUp(binding.binaryMessenger, this)
+        VideoWriterHostApi.setUp(binding.binaryMessenger, this)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        VideoFramesHostApi.setUp(binding.binaryMessenger, null)
+        VideoReaderHostApi.setUp(binding.binaryMessenger, null)
+        VideoWriterHostApi.setUp(binding.binaryMessenger, null)
         synchronized(this) {
             readers.values.forEach { it.close() }
             writers.values.forEach { it.cancel() }

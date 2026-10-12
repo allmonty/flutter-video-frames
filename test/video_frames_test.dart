@@ -3,12 +3,12 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:video_frames/video_frames.dart';
 
-/// In-memory stand-in for the platform side.
-class FakeHostApi extends VideoFramesHostApi {
-  final calls = <String>[];
+/// In-memory stand-in for the platform's decoding side.
+class FakeReaderApi extends VideoReaderHostApi {
+  FakeReaderApi(this.calls);
+
+  final List<String> calls;
   final frames = <int, List<VideoFrameMessage>>{};
-  final written = <int, List<(Uint8List, int)>>{};
-  final writerSizes = <int, (int, int)>{};
 
   @override
   Future<VideoInfoMessage> openReader(
@@ -45,6 +45,15 @@ class FakeHostApi extends VideoFramesHostApi {
 
   @override
   Future<void> closeReader(int readerId) async => calls.add('close $readerId');
+}
+
+/// In-memory stand-in for the platform's encoding side.
+class FakeWriterApi extends VideoWriterHostApi {
+  FakeWriterApi(this.calls);
+
+  final List<String> calls;
+  final written = <int, List<(Uint8List, int)>>{};
+  final writerSizes = <int, (int, int)>{};
 
   @override
   Future<bool> openWriter(
@@ -78,13 +87,18 @@ class FakeHostApi extends VideoFramesHostApi {
 }
 
 void main() {
-  late FakeHostApi api;
-  setUp(() => VideoFrames.api = api = FakeHostApi());
+  late FakeWriterApi writerApi;
+  late List<String> calls;
+  setUp(() {
+    calls = [];
+    VideoFrames.readerApi = FakeReaderApi(calls);
+    VideoFrames.writerApi = writerApi = FakeWriterApi(calls);
+  });
 
   group('VideoReader', () {
     test('open reports info', () async {
       final reader = await VideoReader.open('/v.mp4', maxDimension: 640);
-      expect(api.calls.single, 'open /v.mp4 640 nearest');
+      expect(calls.single, 'open /v.mp4 640 nearest');
       final info = reader.info;
       expect((info.width, info.height), (4, 2));
       expect(info.duration, const Duration(milliseconds: 120));
@@ -97,7 +111,7 @@ void main() {
 
     test('passes the scale filter', () async {
       await VideoReader.open('/v.mp4', maxDimension: 320, filter: ScaleFilter.area);
-      expect(api.calls.single, 'open /v.mp4 320 area');
+      expect(calls.single, 'open /v.mp4 320 area');
     });
 
     test('nextFrame walks frames in order, then returns null', () async {
@@ -125,7 +139,7 @@ void main() {
       final reader = await VideoReader.open('/v.mp4');
       await reader.close();
       await reader.close();
-      expect(api.calls.where((c) => c.startsWith('close')), hasLength(1));
+      expect(calls.where((c) => c.startsWith('close')), hasLength(1));
       expect(reader.nextFrame, throwsStateError);
       expect(() => reader.frameAt(Duration.zero), throwsStateError);
     });
@@ -135,7 +149,7 @@ void main() {
       final b = await VideoReader.open('/b.mp4');
       await a.close();
       await b.close();
-      final closes = api.calls.where((c) => c.startsWith('close')).toList();
+      final closes = calls.where((c) => c.startsWith('close')).toList();
       expect(closes.toSet(), hasLength(2));
     });
   });
@@ -144,7 +158,7 @@ void main() {
     test('rounds odd sizes down to even and crops frames to fit', () async {
       final writer = await VideoWriter.create('/o.mp4', width: 5, height: 3, frameRate: 30);
       expect((writer.width, writer.height), (4, 2));
-      expect(api.calls.single, 'writer /o.mp4 4x2 30.0 null null');
+      expect(calls.single, 'writer /o.mp4 4x2 30.0 null null');
 
       // A 5x3 frame whose pixel (x, y) has red = 10*y + x.
       final full = Uint8List(5 * 3 * 4);
@@ -154,7 +168,7 @@ void main() {
         }
       }
       await writer.addFrame(full, const Duration(milliseconds: 33));
-      final (bytes, pts) = api.written.values.single.single;
+      final (bytes, pts) = writerApi.written.values.single.single;
       expect(pts, 33000);
       expect(bytes, hasLength(4 * 2 * 4));
       expect([for (var i = 0; i < 8; i++) bytes[i * 4]], [0, 1, 2, 3, 10, 11, 12, 13]);
@@ -163,7 +177,7 @@ void main() {
     test('accepts frames already at the even size', () async {
       final writer = await VideoWriter.create('/o.mp4', width: 4, height: 2, frameRate: 30);
       await writer.addFrame(Uint8List(32), Duration.zero);
-      expect(api.written.values.single, hasLength(1));
+      expect(writerApi.written.values.single, hasLength(1));
     });
 
     test('rejects frames of the wrong size', () async {
@@ -180,7 +194,7 @@ void main() {
         bitRate: 500000,
         audioSourcePath: '/in.mov',
       );
-      expect(api.calls.single, 'writer /o.mp4 8x8 24.0 500000 /in.mov');
+      expect(calls.single, 'writer /o.mp4 8x8 24.0 500000 /in.mov');
       expect(kept.includesAudio, isTrue);
       final dropped = await VideoWriter.create(
         '/o.mp4',
@@ -209,8 +223,8 @@ void main() {
       final b = await VideoWriter.create('/b.mp4', width: 4, height: 2, frameRate: 30);
       await b.cancel();
       await b.cancel();
-      expect(api.calls.where((c) => c.startsWith('cancel')), hasLength(1));
-      expect(api.calls.where((c) => c.startsWith('finish')), hasLength(1));
+      expect(calls.where((c) => c.startsWith('cancel')), hasLength(1));
+      expect(calls.where((c) => c.startsWith('finish')), hasLength(1));
     });
   });
 

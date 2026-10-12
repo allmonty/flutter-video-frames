@@ -68,11 +68,14 @@ class VideoFrameMessage {
   Uint8List rgba;
 }
 
-/// Every call runs on a serial background queue on the platform side, so
-/// decoding and encoding never block the platform's main thread. Readers and
-/// writers are addressed by ids chosen on the Dart side.
+// Readers and writers are separate APIs so each gets its own serial
+// background queue: decoding one frame can run while another is encoded.
+// Neither blocks the platform's main thread. Readers and writers are
+// addressed by ids chosen on the Dart side.
+
+/// Decoding, on its own serial background queue.
 @HostApi()
-abstract class VideoFramesHostApi {
+abstract class VideoReaderHostApi {
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
   VideoInfoMessage openReader(int readerId, String path, int? maxDimension, ScaleFilter filter);
 
@@ -87,6 +90,11 @@ abstract class VideoFramesHostApi {
 
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
   void closeReader(int readerId);
+}
+
+/// Encoding, on its own serial background queue.
+@HostApi()
+abstract class VideoWriterHostApi {
 
   /// Returns whether the audio of `audioSourcePath` will be copied; audio
   /// that can't go into an MP4 unchanged is dropped instead of failing.
