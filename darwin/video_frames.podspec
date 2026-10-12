@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'video_frames'
-  s.version          = '1.0.0'
+  s.version          = '1.1.0'
   s.summary          = 'Decode video to RGBA frames and encode RGBA frames to H.264 or HEVC MP4.'
   s.description      = <<-DESC
 Frame-by-frame video decoding and encoding with AVFoundation.

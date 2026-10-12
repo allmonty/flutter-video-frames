@@ -40,8 +40,8 @@ flutter pub add video_frames
 ## Features
 
 - **Read:** decode a video to upright RGBA frames, with rotation metadata
-  applied and optional downscaling. Frames come one by one, or at a given
-  time for scrubbing.
+  applied and optional downscaling. Frames come one by one (from the start
+  or from any point), or at a given time for scrubbing.
 - **Write:** encode RGBA frames to H.264 or HEVC in an MP4, optionally copying
   another file's audio track through unchanged.
 
@@ -103,6 +103,11 @@ try {
 
 // Scrubbing:
 final still = await reader.frameAt(const Duration(seconds: 3));
+
+// Playing from a point: nextFrame() continues from the first frame at or
+// after 3 s (frameAt doesn't move this position).
+await reader.seek(const Duration(seconds: 3));
+final from3s = await reader.nextFrame();
 ```
 
 Paths are file paths, not `content://` URIs. File pickers such as
@@ -204,6 +209,7 @@ H.264 then.
 |---|---|---|
 | Decode | `MediaExtractor` + `MediaCodec` into a `SurfaceTexture`; OpenGL ES converts, rotates and scales, then reads back RGBA | `AVAssetReader` (BGRA); rotated and converted with Accelerate (vImage) |
 | Seek (`frameAt`) | A second decoder: seek to the previous sync frame, then decode forward | A short-lived `AVAssetReader` from the requested time, so frames convert exactly like sequential ones |
+| Seek (`seek`) | The sequential decoder seeks to the previous sync frame; frames before the target are dropped unrendered | The sequential `AVAssetReader` restarts at the requested time; earlier samples are skipped unconverted |
 | Encode | RGBA drawn with OpenGL ES into a `MediaCodec` H.264/HEVC encoder's input surface (the first encoder that starts, hardware first), explicit timestamps, `MediaMuxer` | `AVAssetWriter` + pixel-buffer adaptor, converted with vImage |
 | Audio | Samples copied through `MediaExtractor` → `MediaMuxer` | Passthrough `AVAssetReaderTrackOutput` → `AVAssetWriterInput` |
 
