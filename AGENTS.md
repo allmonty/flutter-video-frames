@@ -23,6 +23,7 @@ cd example/android && ./gradlew :video_frames:testDebugUnitTest
 
 # Swift reader/writer against real AVFoundation on macOS, no device needed
 tool/apple_check.sh
+APPLE_CHECK_NO_ENCODER=1 tool/apple_check.sh   # only checks that need no encoder (what CI's macOS VM can run)
 
 # Device tests (Android device/emulator, iOS, or natively on this Mac with -d macos)
 cd example && flutter test integration_test -d <device>

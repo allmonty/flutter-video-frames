@@ -37,7 +37,10 @@ jobs:
       - working-directory: example/android
         run: ./gradlew :video_frames:testDebugUnitTest
 
-  # The Swift core against real AVFoundation, and the device tests natively on macOS.
+  # GitHub's macOS runners are VMs without the Mac's media engine, so video
+  # encoding never starts there: run the Swift checks that need no encoder and
+  # check that the plugin builds for macOS. Encoding and decoding are covered by
+  # running tool/apple_check.sh and the device tests on a real Mac and devices.
   macos:
     runs-on: macos-latest
     timeout-minutes: 30
@@ -51,7 +54,9 @@ jobs:
           channel: stable
           cache: true
       - run: tool/apple_check.sh
+        env:
+          APPLE_CHECK_NO_ENCODER: '1'
         timeout-minutes: 10
       - working-directory: example
-        run: flutter test integration_test -d macos
+        run: flutter build macos --debug
         timeout-minutes: 20
