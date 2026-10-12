@@ -164,7 +164,7 @@ class FrameWriter(
     }
 
     private fun checkStall(since: Long) {
-        if ((System.nanoTime() - since) / 1_000_000 > STALL_MS) throw IllegalStateException("video encoder stalled")
+        if ((System.nanoTime() - since) / 1_000_000 > STALL_MS) throw EncoderStalledException()
     }
 
     private fun copyAudio() {
@@ -200,3 +200,6 @@ class FrameWriter(
             maxOf(1_000_000, (width.toLong() * height * frameRate * 0.2).toInt())
     }
 }
+
+/** The encoder stopped producing output; reported to Dart as `encoderStalled`. */
+class EncoderStalledException : IllegalStateException("video encoder stalled")

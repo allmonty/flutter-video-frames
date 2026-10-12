@@ -49,7 +49,7 @@ final class FrameWriter {
     ]
     // Devices without an HEVC encoder (e.g. A9 chips) can't apply these settings.
     guard writer.canApply(outputSettings: settings, forMediaType: .video) else {
-      throw VideoFramesError.writeFailed(
+      throw VideoFramesError.codecUnsupported(
         "\(hevc ? "HEVC" : "H.264") encoding at \(width)x\(height) is not supported on this device")
     }
     videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: settings)

@@ -4,13 +4,28 @@ import CoreMedia
 import CoreVideo
 
 enum VideoFramesError: Error, CustomStringConvertible {
+  case fileNotFound(String)
   case noVideoTrack(String)
+  case codecUnsupported(String)
   case readFailed(String)
   case writeFailed(String)
 
+  /// The Dart `VideoFramesErrorCode` name the plugin reports.
+  var code: String {
+    switch self {
+    case .fileNotFound: return "fileNotFound"
+    case .noVideoTrack: return "unsupportedFormat"
+    case .codecUnsupported: return "codecUnsupported"
+    case .readFailed: return "readFailed"
+    case .writeFailed: return "writeFailed"
+    }
+  }
+
   var description: String {
     switch self {
+    case .fileNotFound(let path): return "no file at \(path)"
     case .noVideoTrack(let path): return "no video track in \(path)"
+    case .codecUnsupported(let message): return message
     case .readFailed(let message): return "read failed: \(message)"
     case .writeFailed(let message): return "write failed: \(message)"
     }
@@ -73,6 +88,7 @@ final class FrameReader {
 
   init(path: String, maxDimension: Int?, filter: PixelConversion.Filter = .nearest) throws {
     self.filter = filter
+    guard FileManager.default.fileExists(atPath: path) else { throw VideoFramesError.fileNotFound(path) }
     asset = AVURLAsset(url: URL(fileURLWithPath: path))
     guard let track = asset.tracks(withMediaType: .video).first else {
       throw VideoFramesError.noVideoTrack(path)

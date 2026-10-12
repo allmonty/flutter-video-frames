@@ -35,7 +35,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
     lock.lock()
     defer { lock.unlock() }
     guard let reader = readers[id] else {
-      throw PigeonError(code: "not-found", message: "unknown reader \(id)", details: nil)
+      throw PigeonError(code: "readFailed", message: "unknown reader \(id)", details: nil)
     }
     return reader
   }
@@ -44,26 +44,29 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
     lock.lock()
     defer { lock.unlock() }
     guard let writer = writers[id] else {
-      throw PigeonError(code: "not-found", message: "unknown writer \(id)", details: nil)
+      throw PigeonError(code: "writeFailed", message: "unknown writer \(id)", details: nil)
     }
     return writer
   }
 
-  /// Rethrow native errors with a readable message on the Dart side.
-  private func bridged<T>(_ body: () throws -> T) throws -> T {
+  /// Rethrow native errors with a Dart `VideoFramesErrorCode` name as the
+  /// code; `fallback` is the code for errors that aren't `VideoFramesError`s.
+  private func bridged<T>(_ fallback: String, _ body: () throws -> T) throws -> T {
     do {
       return try body()
     } catch let error as PigeonError {
       throw error
+    } catch let error as VideoFramesError {
+      throw PigeonError(code: error.code, message: error.description, details: nil)
     } catch {
-      throw PigeonError(code: "video-frames", message: "\(error)", details: nil)
+      throw PigeonError(code: fallback, message: "\(error)", details: nil)
     }
   }
 
   func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter) throws
     -> VideoInfoMessage
   {
-    try bridged {
+    try bridged("unsupportedFormat") {
       let reader = try FrameReader(
         path: path, maxDimension: maxDimension.map { Int($0) },
         filter: PixelConversion.Filter(rawValue: filter.rawValue) ?? .nearest)
@@ -78,7 +81,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
   }
 
   func nextFrame(readerId: Int64) throws -> VideoFrameMessage? {
-    try bridged {
+    try bridged("readFailed") {
       let reader = try self.reader(readerId)
       guard let frame = try reader.next() else { return nil }
       return VideoFrameMessage(
@@ -88,7 +91,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
   }
 
   func frameAt(readerId: Int64, timeUs: Int64) throws -> VideoFrameMessage {
-    try bridged {
+    try bridged("readFailed") {
       let reader = try self.reader(readerId)
       let frame = try reader.frame(atUs: timeUs)
       return VideoFrameMessage(
@@ -108,7 +111,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
     writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?,
     audioSourcePath: String?, codec: VideoCodec
   ) throws -> Bool {
-    try bridged {
+    try bridged("writeFailed") {
       let writer = try FrameWriter(
         path: path, width: Int(width), height: Int(height), frameRate: frameRate,
         bitRate: bitRate.map { Int($0) }, audioSourcePath: audioSourcePath, hevc: codec == .hevc)
@@ -120,11 +123,11 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
   }
 
   func addFrame(writerId: Int64, rgba: FlutterStandardTypedData, ptsUs: Int64) throws {
-    try bridged { try writer(writerId).addFrame(rgba: rgba.data, ptsUs: ptsUs) }
+    try bridged("writeFailed") { try writer(writerId).addFrame(rgba: rgba.data, ptsUs: ptsUs) }
   }
 
   func finishWriter(writerId: Int64) throws {
-    try bridged {
+    try bridged("writeFailed") {
       let writer = try self.writer(writerId)
       lock.lock()
       writers.removeValue(forKey: writerId)

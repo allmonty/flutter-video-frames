@@ -88,6 +88,29 @@ pixel, best for large downscales like 4K to 720p):
 final reader = await VideoReader.open(path, maxDimension: 720, filter: ScaleFilter.area);
 ```
 
+## Errors
+
+Failures throw a `VideoFramesException` whose `code` says what happened:
+
+| `VideoFramesErrorCode` | When |
+|---|---|
+| `fileNotFound` | The input path doesn't exist. |
+| `unsupportedFormat` | The file isn't a video the platform can open. |
+| `codecUnsupported` | No codec on the device can handle it, e.g. HEVC without an HEVC encoder. Fall back to H.264. |
+| `encoderStalled` | The encoder stopped producing output (Android). |
+| `readFailed` | Decoding failed partway. |
+| `writeFailed` | Encoding or writing the file failed. |
+| `unknown` | Anything else. |
+
+```dart
+try {
+  writer = await VideoWriter.create(path, width: w, height: h, frameRate: 30, codec: VideoCodec.hevc);
+} on VideoFramesException catch (e) {
+  if (e.code != VideoFramesErrorCode.codecUnsupported) rethrow;
+  writer = await VideoWriter.create(path, width: w, height: h, frameRate: 30);
+}
+```
+
 ## Memory
 
 Every frame is uncompressed RGBA, and it is copied a few times on its way
@@ -143,7 +166,8 @@ Vision decoder.
 
 `codec: VideoCodec.hevc` writes HEVC instead of H.264: about half the file
 size at the same quality, but writer creation fails on devices without an
-HEVC encoder, so fall back to H.264 when it throws.
+HEVC encoder (`VideoFramesErrorCode.codecUnsupported`), so fall back to
+H.264 then.
 
 ## How it works
 

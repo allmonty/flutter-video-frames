@@ -9,10 +9,62 @@ library;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/services.dart' show PlatformException;
 
 import 'src/messages.g.dart';
 
 export 'src/messages.g.dart' show ScaleFilter, VideoCodec;
+
+/// Why a [VideoFramesException] happened.
+enum VideoFramesErrorCode {
+  /// The input path doesn't exist.
+  fileNotFound,
+
+  /// The file exists but isn't a video the platform can open (no video
+  /// track, or a container it can't read).
+  unsupportedFormat,
+
+  /// No codec on this device can decode or encode it (e.g. HEVC on a device
+  /// without an HEVC encoder, or a size the encoders refuse).
+  codecUnsupported,
+
+  /// The encoder stopped producing output (Android).
+  encoderStalled,
+
+  /// Decoding failed partway (including a decoder that stalled).
+  readFailed,
+
+  /// Encoding or writing the file failed.
+  writeFailed,
+
+  /// A failure the plugin didn't classify.
+  unknown,
+}
+
+/// A failure from the platform side of a [VideoReader] or [VideoWriter].
+class VideoFramesException implements Exception {
+  /// A failure with its [code] and the platform's [message].
+  const VideoFramesException(this.code, this.message);
+
+  /// What kind of failure it was.
+  final VideoFramesErrorCode code;
+
+  /// The platform's description, for logs.
+  final String message;
+
+  @override
+  String toString() => 'VideoFramesException(${code.name}): $message';
+}
+
+/// Run a host call, turning the platform's errors into [VideoFramesException].
+Future<T> _guard<T>(Future<T> call) async {
+  try {
+    return await call;
+  } on PlatformException catch (e) {
+    final code = VideoFramesErrorCode.values.asNameMap()[e.code] ?? VideoFramesErrorCode.unknown;
+    throw VideoFramesException(code, e.message ?? e.code);
+  }
+}
 
 /// Metadata of an opened video.
 class VideoInfo {
@@ -121,7 +173,7 @@ class VideoReader {
     ScaleFilter filter = ScaleFilter.nearest,
   }) async {
     final id = VideoFrames._id();
-    final m = await VideoFrames.readerApi.openReader(id, path, maxDimension, filter);
+    final m = await _guard(VideoFrames.readerApi.openReader(id, path, maxDimension, filter));
     return VideoReader._(
       id,
       VideoInfo(
@@ -139,7 +191,7 @@ class VideoReader {
   /// The next frame in presentation order, or null at the end.
   Future<VideoFrame?> nextFrame() async {
     _checkOpen();
-    final m = await VideoFrames.readerApi.nextFrame(_id);
+    final m = await _guard(VideoFrames.readerApi.nextFrame(_id));
     return m == null ? null : _frame(m);
   }
 
@@ -147,7 +199,7 @@ class VideoReader {
   /// [nextFrame]'s position.
   Future<VideoFrame> frameAt(Duration time) async {
     _checkOpen();
-    return _frame(await VideoFrames.readerApi.frameAt(_id, time.inMicroseconds));
+    return _frame(await _guard(VideoFrames.readerApi.frameAt(_id, time.inMicroseconds)));
   }
 
   /// Release the decoders. Calling it again does nothing; reading after it
@@ -156,7 +208,7 @@ class VideoReader {
     if (_closed) return;
     _closed = true;
     _finalizer.detach(this);
-    await VideoFrames.readerApi.closeReader(_id);
+    await _guard(VideoFrames.readerApi.closeReader(_id));
   }
 
   void _checkOpen() {
@@ -223,15 +275,8 @@ class VideoWriter {
     final w = width & ~1, h = height & ~1;
     if (w < 2 || h < 2) throw ArgumentError('video must be at least 2x2, got ${width}x$height');
     final id = VideoFrames._id();
-    final audio = await VideoFrames.writerApi.openWriter(
-      id,
-      path,
-      w,
-      h,
-      frameRate,
-      bitRate,
-      audioSourcePath,
-      codec,
+    final audio = await _guard(
+      VideoFrames.writerApi.openWriter(id, path, w, h, frameRate, bitRate, audioSourcePath, codec),
     );
     return VideoWriter._(id, w, h, width, height, audio);
   }
@@ -240,7 +285,7 @@ class VideoWriter {
   /// size before even-rounding) shown at `pts`.
   Future<void> addFrame(Uint8List rgba, Duration pts) {
     _checkOpen();
-    return VideoFrames.writerApi.addFrame(_id, _fit(rgba), pts.inMicroseconds);
+    return _guard(VideoFrames.writerApi.addFrame(_id, _fit(rgba), pts.inMicroseconds));
   }
 
   /// Flush the encoder, copy the audio track (if any) and close the file.
@@ -249,7 +294,7 @@ class VideoWriter {
     _checkOpen();
     _done = true;
     _finalizer.detach(this);
-    return VideoFrames.writerApi.finishWriter(_id);
+    return _guard(VideoFrames.writerApi.finishWriter(_id));
   }
 
   /// Stop and delete the partial file.
@@ -257,7 +302,7 @@ class VideoWriter {
     if (_done) return;
     _done = true;
     _finalizer.detach(this);
-    await VideoFrames.writerApi.cancelWriter(_id);
+    await _guard(VideoFrames.writerApi.cancelWriter(_id));
   }
 
   Uint8List _fit(Uint8List rgba) {

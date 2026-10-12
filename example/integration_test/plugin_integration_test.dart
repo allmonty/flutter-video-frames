@@ -194,7 +194,7 @@ void main() {
     try {
       viaNext = (await reader.nextFrame())!;
       viaSeek = await reader.frameAt(Duration.zero);
-    } on PlatformException catch (e) {
+    } on VideoFramesException catch (e) {
       // The Android emulator's HEVC decoders can't decode 10-bit video.
       markTestSkipped('cannot decode 10-bit HEVC here: ${e.message}');
       return;
@@ -332,7 +332,8 @@ void main() {
         frameRate: 30,
         codec: VideoCodec.hevc,
       );
-    } on PlatformException catch (e) {
+    } on VideoFramesException catch (e) {
+      if (e.code != VideoFramesErrorCode.codecUnsupported) rethrow;
       markTestSkipped('no HEVC encoder: ${e.message}');
       return;
     }
@@ -349,6 +350,25 @@ void main() {
     await reader.close();
     expect(count, frames);
     expectPixel(first, width ~/ 4, height ~/ 4, (220, 40, 40), 'HEVC top-left red');
+  });
+
+  testWidgets('errors carry codes from the platform', (tester) async {
+    Future<VideoFramesErrorCode?> codeOf(Future<Object?> call) async {
+      try {
+        await call;
+        return null;
+      } on VideoFramesException catch (e) {
+        return e.code;
+      }
+    }
+
+    final dir = Directory.systemTemp.path;
+    expect(
+      await codeOf(VideoReader.open('$dir/does_not_exist.mp4')),
+      VideoFramesErrorCode.fileNotFound,
+    );
+    final notVideo = File('$dir/not_a_video.mp4')..writeAsStringSync('not a video');
+    expect(await codeOf(VideoReader.open(notVideo.path)), VideoFramesErrorCode.unsupportedFormat);
   });
 
   testWidgets('cancel deletes the partial file', (tester) async {

@@ -1,6 +1,7 @@
 package com.allmonty.video_frames
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import java.io.File
 
 /**
  * Routes the Pigeon host APIs to [FrameReader]s and [FrameWriter]s by id.
@@ -30,7 +31,9 @@ class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi 
     private fun writer(id: Long) = synchronized(this) { writers[id] } ?: throw IllegalArgumentException("unknown writer $id")
 
     override fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter): VideoInfoMessage {
-        val reader = FrameReader(path, maxDimension?.toInt(), filter)
+        if (!File(path).isFile) throw FlutterError("fileNotFound", "no file at $path")
+        // Opening only reads the container (decoders start on the first frame), so failures here are the file's.
+        val reader = coded("unsupportedFormat") { FrameReader(path, maxDimension?.toInt(), filter) }
         synchronized(this) { readers[readerId] = reader }
         return VideoInfoMessage(
             width = reader.width.toLong(),
@@ -45,13 +48,13 @@ class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi 
 
     override fun nextFrame(readerId: Long): VideoFrameMessage? {
         val reader = reader(readerId)
-        val (pts, rgba) = reader.next() ?: return null
+        val (pts, rgba) = coded("readFailed") { reader.next() } ?: return null
         return VideoFrameMessage(pts, reader.width.toLong(), reader.height.toLong(), rgba)
     }
 
     override fun frameAt(readerId: Long, timeUs: Long): VideoFrameMessage {
         val reader = reader(readerId)
-        val (pts, rgba) = reader.frameAt(timeUs)
+        val (pts, rgba) = coded("readFailed") { reader.frameAt(timeUs) }
         return VideoFrameMessage(pts, reader.width.toLong(), reader.height.toLong(), rgba)
     }
 
@@ -69,21 +72,41 @@ class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi 
         audioSourcePath: String?,
         codec: VideoCodec,
     ): Boolean {
-        val writer = FrameWriter(path, width.toInt(), height.toInt(), frameRate, bitRate?.toInt(), audioSourcePath, codec)
+        val writer = coded("writeFailed") {
+            FrameWriter(path, width.toInt(), height.toInt(), frameRate, bitRate?.toInt(), audioSourcePath, codec)
+        }
         synchronized(this) { writers[writerId] = writer }
         return writer.audioIncluded
     }
 
     override fun addFrame(writerId: Long, rgba: ByteArray, ptsUs: Long) {
-        writer(writerId).addFrame(rgba, ptsUs)
+        coded("writeFailed") { writer(writerId).addFrame(rgba, ptsUs) }
     }
 
     override fun finishWriter(writerId: Long) {
         val writer = synchronized(this) { writers.remove(writerId) } ?: throw IllegalArgumentException("unknown writer $writerId")
-        writer.finish()
+        coded("writeFailed") { writer.finish() }
     }
 
     override fun cancelWriter(writerId: Long) {
         synchronized(this) { writers.remove(writerId) }?.cancel()
+    }
+
+    /**
+     * Run `body`, rethrowing failures as a [FlutterError] whose code is a Dart
+     * `VideoFramesErrorCode` name, so apps can tell them apart; `fallback` is
+     * the code for anything not more specific.
+     */
+    private inline fun <T> coded(fallback: String, body: () -> T): T = try {
+        body()
+    } catch (e: FlutterError) {
+        throw e
+    } catch (e: Exception) {
+        val code = when (e) {
+            is UnsupportedOperationException -> "codecUnsupported"
+            is EncoderStalledException -> "encoderStalled"
+            else -> fallback
+        }
+        throw FlutterError(code, e.message ?: e.toString())
     }
 }

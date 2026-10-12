@@ -32,6 +32,15 @@ let format = AVURLAsset(url: URL(fileURLWithPath: path)).tracks(withMediaType: .
 let matrix = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_YCbCrMatrix) as? String
 check(matrix == (kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2 as String), "output tagged BT.709 (\(matrix ?? "untagged"))")
 
+// Error codes reported to Dart.
+func code(_ body: () throws -> Any) -> String {
+  do { _ = try body(); return "no error" } catch let e as VideoFramesError { return e.code } catch { return "\(error)" }
+}
+check(code { try FrameReader(path: "/nonexistent/video.mp4", maxDimension: nil) } == "fileNotFound", "missing file -> fileNotFound")
+let notVideo = NSTemporaryDirectory() + "vf_not_a_video.mp4"
+try "not a video".write(toFile: notVideo, atomically: true, encoding: .utf8)
+check(code { try FrameReader(path: notVideo, maxDimension: nil) } == "unsupportedFormat", "non-video file -> unsupportedFormat")
+
 // HEVC: a round trip through the HEVC encoder.
 let hevcPath = NSTemporaryDirectory() + "vf_check_hevc.mp4"
 let hevcWriter = try FrameWriter(path: hevcPath, width: w, height: h, frameRate: 30, bitRate: nil, audioSourcePath: nil, hevc: true)

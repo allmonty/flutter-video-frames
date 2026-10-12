@@ -1,5 +1,5 @@
-import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:video_frames/video_frames.dart';
 import 'package:video_frames/testing.dart';
@@ -86,6 +86,17 @@ class FakeWriterApi extends VideoWriterHostApi {
 
   @override
   Future<void> cancelWriter(int writerId) async => calls.add('cancel $writerId');
+}
+
+/// A writer API whose addFrame fails the way the platform reports errors.
+class FailingWriterApi extends FakeWriterApi {
+  FailingWriterApi(super.calls, this.code);
+
+  final String code;
+
+  @override
+  Future<void> addFrame(int writerId, Uint8List rgba, int ptsUs) async =>
+      throw PlatformException(code: code, message: 'boom');
 }
 
 void main() {
@@ -244,5 +255,31 @@ void main() {
   test('cropRgba keeps the top-left corner', () {
     final src = Uint8List.fromList(List.generate(3 * 2 * 4, (i) => i));
     expect(cropRgba(src, 3, 2, 1), [0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  group('errors', () {
+    test('platform error codes become VideoFramesException codes', () async {
+      VideoFrames.writerApi = FailingWriterApi(calls, 'encoderStalled');
+      final writer = await VideoWriter.create('/o.mp4', width: 4, height: 2, frameRate: 30);
+      await expectLater(
+        writer.addFrame(Uint8List(32), Duration.zero),
+        throwsA(
+          isA<VideoFramesException>()
+              .having((e) => e.code, 'code', VideoFramesErrorCode.encoderStalled)
+              .having((e) => e.message, 'message', 'boom'),
+        ),
+      );
+    });
+
+    test('unknown platform codes become unknown', () async {
+      VideoFrames.writerApi = FailingWriterApi(calls, 'SomethingElse');
+      final writer = await VideoWriter.create('/o.mp4', width: 4, height: 2, frameRate: 30);
+      await expectLater(
+        writer.addFrame(Uint8List(32), Duration.zero),
+        throwsA(
+          isA<VideoFramesException>().having((e) => e.code, 'code', VideoFramesErrorCode.unknown),
+        ),
+      );
+    });
   });
 }

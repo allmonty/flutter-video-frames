@@ -54,6 +54,10 @@
   `VideoInfoMessage`) moved from `package:video_frames/video_frames.dart` to
   `package:video_frames/testing.dart`, and `VideoFrames.readerApi` /
   `writerApi` are `@visibleForTesting`. Every public member is documented.
+- **Breaking:** failures throw `VideoFramesException` with a
+  `VideoFramesErrorCode` (`fileNotFound`, `unsupportedFormat`,
+  `codecUnsupported`, `encoderStalled`, `readFailed`, `writeFailed`,
+  `unknown`) instead of a raw `PlatformException`.
 
 ## 0.3.0
 
