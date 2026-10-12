@@ -3,6 +3,8 @@
 - A writer whose `finish()` fails now frees the encoder and deletes the broken
   file (Android leaked the hardware encoder; both platforms left the file).
   An Android writer that fails while being created no longer leaks it either.
+- Android: a stuck encoder now fails with "video encoder stalled" after 5
+  seconds instead of hanging `addFrame` or `finish` forever.
 
 ## 0.3.0
 

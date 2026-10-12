@@ -88,11 +88,7 @@ class FrameWriter(
 
     fun addFrame(rgba: ByteArray, ptsUs: Long) {
         require(rgba.size == width * height * 4) { "expected ${width * height * 4} bytes, got ${rgba.size}" }
-        var index: Int
-        do {
-            index = codec.dequeueInputBuffer(TIMEOUT_US)
-            if (index < 0) drain(false)
-        } while (index < 0)
+        val index = dequeueInput()
         val image = codec.getInputImage(index) ?: throw IllegalStateException("encoder gave no YUV image")
         val planes = image.planes
         ColorConversion.rgbaToYuv(
@@ -107,12 +103,7 @@ class FrameWriter(
 
     fun finish() {
         try {
-            var index: Int
-            do {
-                index = codec.dequeueInputBuffer(TIMEOUT_US)
-                if (index < 0) drain(false)
-            } while (index < 0)
-            codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            codec.queueInputBuffer(dequeueInput(), 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
             drain(true)
             copyAudio()
         } catch (e: Exception) {
@@ -128,11 +119,24 @@ class FrameWriter(
         File(path).delete()
     }
 
+    /** An input buffer index, draining output while the encoder is full. */
+    private fun dequeueInput(): Int {
+        val since = System.nanoTime()
+        while (true) {
+            val index = codec.dequeueInputBuffer(TIMEOUT_US)
+            if (index >= 0) return index
+            drain(false)
+            checkStall(since)
+        }
+    }
+
     private fun drain(endOfStream: Boolean) {
+        var idleSince = System.nanoTime()
         while (true) {
             val index = codec.dequeueOutputBuffer(info, TIMEOUT_US)
+            if (index != MediaCodec.INFO_TRY_AGAIN_LATER) idleSince = System.nanoTime()
             when {
-                index == MediaCodec.INFO_TRY_AGAIN_LATER -> if (!endOfStream) return
+                index == MediaCodec.INFO_TRY_AGAIN_LATER -> if (endOfStream) checkStall(idleSince) else return
                 index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     videoTrack = muxer.addTrack(codec.outputFormat)
                     muxer.start()
@@ -151,6 +155,10 @@ class FrameWriter(
                 }
             }
         }
+    }
+
+    private fun checkStall(since: Long) {
+        if ((System.nanoTime() - since) / 1_000_000 > STALL_MS) throw IllegalStateException("video encoder stalled")
     }
 
     private fun copyAudio() {
@@ -178,6 +186,7 @@ class FrameWriter(
     companion object {
         private const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
         private const val TIMEOUT_US = 10_000L
+        private const val STALL_MS = 5_000L
 
         /** ~0.2 bits per pixel per frame: good quality for flat pixel art. */
         fun defaultBitRate(width: Int, height: Int, frameRate: Double): Int =
