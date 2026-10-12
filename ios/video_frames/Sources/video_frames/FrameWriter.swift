@@ -35,6 +35,12 @@ final class FrameWriter {
         AVVideoCodecKey: AVVideoCodecType.h264,
         AVVideoWidthKey: width,
         AVVideoHeightKey: height,
+        // Tag BT.709 so players don't guess (HD is 709; untagged often reads as 601).
+        AVVideoColorPropertiesKey: [
+          AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+          AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+          AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+        ],
         AVVideoCompressionPropertiesKey: [
           AVVideoAverageBitRateKey: bits,
           AVVideoMaxKeyFrameIntervalKey: max(1, Int(frameRate.rounded())),

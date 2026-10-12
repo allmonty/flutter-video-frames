@@ -53,6 +53,10 @@ class FrameWriter(
                 setInteger(MediaFormat.KEY_BIT_RATE, bitRate ?: defaultBitRate(width, height, frameRate))
                 setFloat(MediaFormat.KEY_FRAME_RATE, frameRate.toFloat())
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                // Ask for, and tag, BT.709 so players don't guess (HD is 709; untagged often reads as 601).
+                setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+                setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+                setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
             }
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             val input = codec.createInputSurface().also { inputSurface = it }

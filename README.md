@@ -96,6 +96,13 @@ H.264 needs even dimensions. `VideoWriter` rounds the size down to even
 numbers (`writer.width` and `writer.height`) and crops frames given at the
 requested size.
 
+## Colors
+
+Written videos are tagged as BT.709 SDR, the standard for HD, so players
+don't have to guess. When reading, iOS converts with the video's own color
+tags. On Android the GPU driver is expected to apply them; the Android
+emulator's doesn't, so colors read there can be slightly off.
+
 ## How it works
 
 | | Android (minSdk 24) | iOS (15+) |

@@ -15,6 +15,8 @@
   emulator; iOS uses Accelerate (vImage) for full-size frames.
 - Android: the first `frameAt` on a reader no longer sometimes fails with
   "video decoder stalled".
+- Written videos are tagged BT.709 (both platforms). Players no longer guess
+  the color space, which shifted greens and skin tones in HD output.
 
 ## 0.3.0
 

@@ -23,13 +23,23 @@ Uint8List syntheticFrame(int width, int height, int i) {
   return out;
 }
 
-/// Asserts the pixel at (x, y) is within 40 of `rgb` per channel (lossy codec).
-void expectPixel(VideoFrame f, int x, int y, (int, int, int) rgb, String where) {
+/// Asserts the pixel at (x, y) is within `tolerance` of `rgb` per channel
+/// (lossy codec).
+void expectPixel(
+  VideoFrame f,
+  int x,
+  int y,
+  (int, int, int) rgb,
+  String where, [
+  int tolerance = 40,
+]) {
   final o = (y * f.width + x) * 4;
   final (r, g, b) = rgb;
   final got = (f.rgba[o], f.rgba[o + 1], f.rgba[o + 2]);
   expect(
-    (got.$1 - r).abs() <= 40 && (got.$2 - g).abs() <= 40 && (got.$3 - b).abs() <= 40,
+    (got.$1 - r).abs() <= tolerance &&
+        (got.$2 - g).abs() <= tolerance &&
+        (got.$3 - b).abs() <= tolerance,
     isTrue,
     reason: '$where: expected $rgb, got $got',
   );
@@ -48,7 +58,7 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('applies rotation metadata, scaled or not', (tester) async {
-    // 128x64, tagged 90°; see tool/make_rotated_fixture.swift.
+    // 128x64, tagged 90°; see tool/make_fixtures.swift.
     final data = await rootBundle.load('integration_test/assets/rotated90.mp4');
     final path = '${Directory.systemTemp.path}/video_frames_rotated90.mp4';
     File(path).writeAsBytesSync(data.buffer.asUint8List());
@@ -69,6 +79,55 @@ void main() {
     expect((scaled.info.width, scaled.info.height), (32, 64));
     expectUprightQuadrants((await scaled.nextFrame())!);
     await scaled.close();
+  });
+
+  testWidgets('HD colors match a BT.709 reference after a round trip', (tester) async {
+    // The same four colors as colors709.mp4 (made by AVFoundation, tagged
+    // BT.709). Comparing against how this device decodes that file isolates
+    // our encoder: the Android emulator's GPU ignores color tags when decoding,
+    // so absolute colors are off there, but a 601/709 mix-up in the encoder
+    // still shows as a difference (green moves by 20+).
+    const colors = [(40, 200, 60), (224, 172, 140), (200, 40, 40), (40, 60, 200)];
+    const width = 1280, height = 720;
+    final frame = Uint8List(width * height * 4);
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        final (r, g, b) = colors[(y < height ~/ 2 ? 0 : 2) + (x < width ~/ 2 ? 0 : 1)];
+        final o = (y * width + x) * 4;
+        frame
+          ..[o] = r
+          ..[o + 1] = g
+          ..[o + 2] = b
+          ..[o + 3] = 255;
+      }
+    }
+    final path = '${Directory.systemTemp.path}/video_frames_colors.mp4';
+    final writer = await VideoWriter.create(path, width: width, height: height, frameRate: 30);
+    for (var i = 0; i < 5; i++) {
+      await writer.addFrame(frame, Duration(microseconds: i * 33333));
+    }
+    await writer.finish();
+
+    final data = await rootBundle.load('integration_test/assets/colors709.mp4');
+    final refPath = '${Directory.systemTemp.path}/video_frames_colors709.mp4';
+    File(refPath).writeAsBytesSync(data.buffer.asUint8List());
+
+    Future<VideoFrame> firstFrame(String p) async {
+      final reader = await VideoReader.open(p);
+      final f = (await reader.nextFrame())!;
+      await reader.close();
+      return f;
+    }
+
+    final ours = await firstFrame(path);
+    final reference = await firstFrame(refPath);
+    for (var q = 0; q < 4; q++) {
+      final x = q.isEven ? width ~/ 4 : width * 3 ~/ 4;
+      final y = q < 2 ? height ~/ 4 : height * 3 ~/ 4;
+      final o = (y * width + x) * 4;
+      final (r, g, b) = (reference.rgba[o], reference.rgba[o + 1], reference.rgba[o + 2]);
+      expectPixel(ours, x, y, (r, g, b), 'color ${colors[q]} vs reference ($r, $g, $b)', 8);
+    }
   });
 
   testWidgets('1080p speed (logged, not asserted)', (tester) async {

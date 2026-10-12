@@ -28,6 +28,29 @@ let reader = try FrameReader(path: path, maxDimension: nil)
 check(reader.width == w && reader.height == h, "size \(reader.width)x\(reader.height)")
 check(!reader.hasAudio, "no audio")
 check(reader.rotation == 0, "rotation 0")
+let format = AVURLAsset(url: URL(fileURLWithPath: path)).tracks(withMediaType: .video)[0].formatDescriptions[0] as! CMFormatDescription
+let matrix = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_YCbCrMatrix) as? String
+check(matrix == (kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2 as String), "output tagged BT.709 (\(matrix ?? "untagged"))")
+
+// HD colors that shift by 20+ under a 601/709 mix-up survive a round trip.
+let hdColors: [(UInt8, UInt8, UInt8)] = [(40, 200, 60), (224, 172, 140), (200, 40, 40), (40, 60, 200)]
+let (hw, hh) = (1280, 720)
+var hd = Data(count: hw * hh * 4)
+for y in 0..<hh { for x in 0..<hw {
+  let (r, g, b) = hdColors[(y < hh / 2 ? 0 : 2) + (x < hw / 2 ? 0 : 1)]
+  let o = (y * hw + x) * 4
+  hd[o] = r; hd[o + 1] = g; hd[o + 2] = b; hd[o + 3] = 255
+} }
+let hdPath = NSTemporaryDirectory() + "vf_check_hd.mp4"
+let hdWriter = try FrameWriter(path: hdPath, width: hw, height: hh, frameRate: 30, bitRate: nil, audioSourcePath: nil)
+for i in 0..<5 { try hdWriter.addFrame(rgba: hd, ptsUs: Int64(i) * 33333) }
+try hdWriter.finish()
+let hdFrame = try FrameReader(path: hdPath, maxDimension: nil).next()!.rgba
+for (q, (r, g, b)) in hdColors.enumerated() {
+  let o = ((q < 2 ? hh / 4 : hh * 3 / 4) * hw + (q % 2 == 0 ? hw / 4 : hw * 3 / 4)) * 4
+  let got = (Int(hdFrame[o]), Int(hdFrame[o + 1]), Int(hdFrame[o + 2]))
+  check(abs(got.0 - Int(r)) <= 12 && abs(got.1 - Int(g)) <= 12 && abs(got.2 - Int(b)) <= 12, "HD color \((r, g, b)) -> \(got)")
+}
 var count = 0
 var first: [UInt8]? = nil
 var lastPts: Int64 = -1
