@@ -38,6 +38,9 @@
   buffer per decoder instead of allocating a new array (plus a copy) per
   frame; iOS builds frames as `Data`, dropping a full-frame copy in the
   plugin. The README has a per-resolution memory table.
+- Android: a decoder that fails mid-stream now reports which codec and video
+  it was ("c2.x.hevc.decoder (video/hevc 640x360) can't decode this video")
+  instead of only "Invalid to call at Released state".
 
 ## 0.3.0
 

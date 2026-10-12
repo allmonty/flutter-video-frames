@@ -115,6 +115,8 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
         private val pixels = ByteBuffer.wrap(frame)
         private val renderer = GlRenderer.forDecoding(width, height, filter, areaTaps, srcWidth, srcHeight)
         private val extractor = MediaExtractor()
+        /** e.g. "c2.goldfish.hevc.decoder (video/hevc 640x360)", for error messages; set by openCodec. */
+        private var description = "video decoder"
         private val codec: MediaCodec = try {
             openCodec()
         } catch (e: Exception) {
@@ -143,6 +145,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
             val trackMime = format.getString(MediaFormat.KEY_MIME)!!
             val mime = decodableMime(format)
             val codec = createDecoder(format, mime)
+            description = "${codec.name} ($mime ${format.getInteger(MediaFormat.KEY_WIDTH)}x${format.getInteger(MediaFormat.KEY_HEIGHT)})"
             try {
                 // Rotation isn't passed on: the renderer applies it.
                 val config = MediaFormat.createVideoFormat(mime, format.getInteger(MediaFormat.KEY_WIDTH), format.getInteger(MediaFormat.KEY_HEIGHT))
@@ -179,7 +182,15 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
          * return it converted; earlier frames are released unconverted.
          * Returns null at the end of the stream.
          */
-        fun nextAtOrAfter(minPtsUs: Long): Pair<Long, ByteArray>? {
+        fun nextAtOrAfter(minPtsUs: Long): Pair<Long, ByteArray>? = try {
+            decodeUntil(minPtsUs)
+        } catch (e: IllegalStateException) {
+            // A codec that fails mid-stream (e.g. unsupported 10-bit video) only says
+            // "Invalid to call at Released state"; name the codec and the video.
+            throw IllegalStateException("$description can't decode this video: ${e.message}", e)
+        }
+
+        private fun decodeUntil(minPtsUs: Long): Pair<Long, ByteArray>? {
             var idleSince = System.nanoTime()
             while (!outputDone) {
                 var progressed = false
