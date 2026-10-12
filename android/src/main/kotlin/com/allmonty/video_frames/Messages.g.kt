@@ -414,6 +414,11 @@ interface VideoReaderHostApi {
    * sequential position used by [nextFrame].
    */
   fun frameAt(readerId: Long, timeUs: Long): VideoFrameMessage
+  /**
+   * Moves the sequential position: the next [nextFrame] returns the first
+   * frame at or after `timeUs`. Doesn't affect [frameAt].
+   */
+  fun seek(readerId: Long, timeUs: Long)
   fun closeReader(readerId: Long)
 
   companion object {
@@ -472,6 +477,25 @@ interface VideoReaderHostApi {
             val timeUsArg = args[1] as Long
             val wrapped: List<Any?> = try {
               listOf(api.frameAt(readerIdArg, timeUsArg))
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.VideoReaderHostApi.seek$separatedMessageChannelSuffix", codec, taskQueue)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val readerIdArg = args[0] as Long
+            val timeUsArg = args[1] as Long
+            val wrapped: List<Any?> = try {
+              api.seek(readerIdArg, timeUsArg)
+              listOf(null)
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)
             }

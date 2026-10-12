@@ -204,6 +204,17 @@ class VideoReader {
     return _frame(await _guard(VideoFrames.readerApi.frameAt(_id, time.inMicroseconds)));
   }
 
+  /// Move [nextFrame]'s position: the next call returns the first frame at
+  /// or after `time` (null when `time` is past the end), and the frames
+  /// after it in order. Decoding restarts at the previous sync frame and the
+  /// frames before `time` are skipped without being converted, so playing
+  /// from a point doesn't pay for the whole video before it. Doesn't affect
+  /// [frameAt].
+  Future<void> seek(Duration time) async {
+    _checkOpen();
+    await _guard(VideoFrames.readerApi.seek(_id, time.inMicroseconds));
+  }
+
   /// Release the decoders. Calling it again does nothing; reading after it
   /// throws a [StateError].
   Future<void> close() async {
