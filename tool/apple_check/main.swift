@@ -41,19 +41,23 @@ let notVideo = NSTemporaryDirectory() + "vf_not_a_video.mp4"
 try "not a video".write(toFile: notVideo, atomically: true, encoding: .utf8)
 check(code { try FrameReader(path: notVideo, maxDimension: nil) } == "unsupportedFormat", "non-video file -> unsupportedFormat")
 
-// HEVC: a round trip through the HEVC encoder.
+// HEVC: a round trip through the HEVC encoder (skipped on Macs without one, e.g. some CI VMs).
 let hevcPath = NSTemporaryDirectory() + "vf_check_hevc.mp4"
-let hevcWriter = try FrameWriter(path: hevcPath, width: w, height: h, frameRate: 30, bitRate: nil, audioSourcePath: nil, hevc: true)
-for i in 0..<10 { try hevcWriter.addFrame(rgba: frame(w, h, i), ptsUs: Int64(i) * 33333) }
-try hevcWriter.finish()
-let hevcFormat = AVURLAsset(url: URL(fileURLWithPath: hevcPath)).tracks(withMediaType: .video)[0].formatDescriptions[0] as! CMFormatDescription
-check(CMFormatDescriptionGetMediaSubType(hevcFormat) == kCMVideoCodecType_HEVC, "HEVC writer writes HEVC")
-let hevcReader = try FrameReader(path: hevcPath, maxDimension: nil)
-var hevcFrames = 0
-var hevcFirst: Data?
-while let f = try hevcReader.next() { hevcFirst = hevcFirst ?? f.rgba; hevcFrames += 1 }
-check(hevcFrames == 10, "HEVC decoded \(hevcFrames) frames")
-check(hevcFirst![o] > 170 && hevcFirst![o + 1] < 100, "HEVC top-left is red")
+do {
+  let hevcWriter = try FrameWriter(path: hevcPath, width: w, height: h, frameRate: 30, bitRate: nil, audioSourcePath: nil, hevc: true)
+  for i in 0..<10 { try hevcWriter.addFrame(rgba: frame(w, h, i), ptsUs: Int64(i) * 33333) }
+  try hevcWriter.finish()
+  let hevcFormat = AVURLAsset(url: URL(fileURLWithPath: hevcPath)).tracks(withMediaType: .video)[0].formatDescriptions[0] as! CMFormatDescription
+  check(CMFormatDescriptionGetMediaSubType(hevcFormat) == kCMVideoCodecType_HEVC, "HEVC writer writes HEVC")
+  let hevcReader = try FrameReader(path: hevcPath, maxDimension: nil)
+  var hevcFrames = 0
+  var hevcFirst: Data?
+  while let f = try hevcReader.next() { hevcFirst = hevcFirst ?? f.rgba; hevcFrames += 1 }
+  check(hevcFrames == 10, "HEVC decoded \(hevcFrames) frames")
+  check(hevcFirst![o] > 170 && hevcFirst![o + 1] < 100, "HEVC top-left is red")
+} catch let error as VideoFramesError where error.code == "codecUnsupported" {
+  print("SKIP HEVC: \(error)")
+}
 
 // HDR (HLG / BT.2020, 10-bit HEVC) input: AVFoundation tone-maps it to SDR, and frameAt matches next().
 let hlg = try FrameReader(path: "example/integration_test/assets/hlg.mp4", maxDimension: nil)
@@ -140,10 +144,24 @@ let cw = try FrameWriter(path: cancelPath, width: 64, height: 64, frameRate: 30,
 try cw.addFrame(rgba: frame(64, 64, 0), ptsUs: 0)
 cw.cancel()
 check(!FileManager.default.fileExists(atPath: cancelPath), "cancel deletes the file")
-// Audio passthrough: needs an audio file; the script makes one with `say`.
-if CommandLine.arguments.count > 1 {
+// Audio passthrough, from a generated one-second tone as AAC (.m4a) and PCM (.aiff).
+func writeTone(_ path: String, _ settings: [String: Any]) throws {
+  try? FileManager.default.removeItem(atPath: path)
+  let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+  let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100)!
+  buffer.frameLength = 44_100
+  for i in 0..<44_100 { buffer.floatChannelData![0][i] = 0.3 * sin(Float(i) * 2 * .pi * 440 / 44_100) }
+  let file = try AVAudioFile(forWriting: URL(fileURLWithPath: path), settings: settings)
+  try file.write(from: buffer)
+}
+let aacPath = NSTemporaryDirectory() + "vf_tone.m4a"
+let aiffPath = NSTemporaryDirectory() + "vf_tone.aiff"
+try writeTone(aacPath, [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44_100, AVNumberOfChannelsKey: 1])
+try writeTone(aiffPath, [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 44_100, AVNumberOfChannelsKey: 1,
+  AVLinearPCMBitDepthKey: 16, AVLinearPCMIsBigEndianKey: true, AVLinearPCMIsFloatKey: false])
+do {
   let audioPath = NSTemporaryDirectory() + "vf_audio.mp4"
-  let aw = try FrameWriter(path: audioPath, width: 64, height: 64, frameRate: 10, bitRate: nil, audioSourcePath: CommandLine.arguments[1])
+  let aw = try FrameWriter(path: audioPath, width: 64, height: 64, frameRate: 10, bitRate: nil, audioSourcePath: aacPath)
   for i in 0..<20 { try aw.addFrame(rgba: Data(repeating: UInt8(i * 10), count: 64 * 64 * 4), ptsUs: Int64(i) * 100_000) }
   try aw.finish()
   check(aw.audioIncluded, "writer reports AAC audio included")
@@ -152,10 +170,10 @@ if CommandLine.arguments.count > 1 {
   check(withAudio.audioCompatible, "copied AAC audio reported compatible")
 
   // Compatibility of the source formats themselves.
-  let aac = AVURLAsset(url: URL(fileURLWithPath: CommandLine.arguments[1])).tracks(withMediaType: .audio).first!
+  let aac = AVURLAsset(url: URL(fileURLWithPath: aacPath)).tracks(withMediaType: .audio).first!
   check(AudioSupport.canCopyIntoMp4(aac), "AAC can be copied into an MP4")
-  if CommandLine.arguments.count > 2 {
-    let pcmPath = CommandLine.arguments[2]
+  do {
+    let pcmPath = aiffPath
     let pcm = AVURLAsset(url: URL(fileURLWithPath: pcmPath)).tracks(withMediaType: .audio).first!
     // AVFoundation accepts PCM passthrough into an MP4 (Apple players handle
     // it), so on iOS it counts as compatible and is written.
