@@ -1,5 +1,7 @@
 ## Unreleased
 
+- macOS support (12+). iOS and macOS share one Swift implementation
+  (`sharedDarwinSource`), which moved from `ios/` to `darwin/`.
 - A writer whose `finish()` fails now frees the encoder and deletes the broken
   file (Android leaked the hardware encoder; both platforms left the file).
   An Android writer that fails while being created no longer leaks it either.

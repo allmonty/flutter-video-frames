@@ -6,7 +6,8 @@ import PackageDescription
 let package = Package(
     name: "video_frames",
     platforms: [
-        .iOS("15.0")
+        .iOS("15.0"),
+        .macOS("12.0"),
     ],
     products: [
         .library(name: "video-frames", targets: ["video_frames"])

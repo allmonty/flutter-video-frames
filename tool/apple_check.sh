@@ -4,7 +4,7 @@
 set -e
 cd "$(dirname "$0")/.."
 out="${TMPDIR:-/tmp}/video_frames_apple_check"
-src=ios/video_frames/Sources/video_frames
+src=darwin/video_frames/Sources/video_frames
 mkdir -p "$out"
 say -o "$out/speech.aiff" "video frames audio check"
 afconvert -f m4af -d aac "$out/speech.aiff" "$out/speech.m4a"

@@ -1,5 +1,8 @@
-import Flutter
-import UIKit
+#if os(iOS)
+  import Flutter
+#elseif os(macOS)
+  import FlutterMacOS
+#endif
 
 /// Routes the Pigeon host APIs to `FrameReader`s and `FrameWriter`s by id.
 /// Pigeon runs reader calls and writer calls on two separate serial
@@ -11,16 +14,25 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let instance = VideoFramesPlugin()
-    VideoReaderHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: instance)
-    VideoWriterHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: instance)
+    VideoReaderHostApiSetup.setUp(binaryMessenger: messenger(registrar), api: instance)
+    VideoWriterHostApiSetup.setUp(binaryMessenger: messenger(registrar), api: instance)
     // Published so the engine calls detachFromEngine(for:) on shutdown.
     registrar.publish(instance)
   }
 
+  /// The registrar's messenger: a method on iOS, a property on macOS.
+  private static func messenger(_ registrar: FlutterPluginRegistrar) -> FlutterBinaryMessenger {
+    #if os(iOS)
+      return registrar.messenger()
+    #else
+      return registrar.messenger
+    #endif
+  }
+
   /// Free every decoder and encoder still open when the engine goes away.
   public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
-    VideoReaderHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: nil)
-    VideoWriterHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: nil)
+    VideoReaderHostApiSetup.setUp(binaryMessenger: VideoFramesPlugin.messenger(registrar), api: nil)
+    VideoWriterHostApiSetup.setUp(binaryMessenger: VideoFramesPlugin.messenger(registrar), api: nil)
     lock.lock()
     let openReaders = readers.values
     let openWriters = writers.values

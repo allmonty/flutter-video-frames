@@ -5,21 +5,24 @@
 Pod::Spec.new do |s|
   s.name             = 'video_frames'
   s.version          = '0.0.1'
-  s.summary          = 'Decode video to RGBA frames and encode RGBA frames to H.264 MP4.'
+  s.summary          = 'Decode video to RGBA frames and encode RGBA frames to H.264 or HEVC MP4.'
   s.description      = <<-DESC
 Frame-by-frame video decoding and encoding with AVFoundation.
                        DESC
-  s.homepage         = 'http://example.com'
+  s.homepage         = 'https://github.com/allmonty/flutter-video-frames'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'Your Company' => 'email@example.com' }
+  s.author           = { 'Allan Monteiro' => 'allanbrados@gmail.com' }
   s.source           = { :path => '.' }
   s.source_files = 'video_frames/Sources/video_frames/**/*.swift'
-  s.dependency 'Flutter'
-  s.platform = :ios, '15.0'
+  s.ios.deployment_target = '15.0'
+  s.osx.deployment_target = '12.0'
+  s.ios.dependency 'Flutter'
+  s.osx.dependency 'FlutterMacOS'
   s.frameworks = 'Accelerate', 'AVFoundation', 'CoreMedia', 'CoreVideo'
 
-  # Flutter.framework does not contain a i386 slice.
-  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
+  # Flutter.framework does not contain a i386 slice, which is specific to iOS.
+  s.ios.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
+  s.osx.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
   s.swift_version = '5.0'
 
   # If your plugin requires a privacy manifest, for example if it uses any
