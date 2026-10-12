@@ -67,9 +67,16 @@ abstract final class VideoFrames {
   static int _id() => _nextId++;
 }
 
-/// Reads frames from a video file.
+/// Reads frames from a video file. Always [close] it (e.g. in a `finally`):
+/// it holds a hardware decoder until then.
 class VideoReader {
-  VideoReader._(this._id, this.info);
+  VideoReader._(this._id, this.info) {
+    _finalizer.attach(this, _id, detach: this);
+  }
+
+  // A safety net for readers that are never closed; finalizers aren't
+  // guaranteed to run, so it doesn't replace [close].
+  static final _finalizer = Finalizer<int>((id) => VideoFrames.api.closeReader(id).ignore());
 
   final int _id;
   final VideoInfo info;
@@ -111,6 +118,7 @@ class VideoReader {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    _finalizer.detach(this);
     await VideoFrames.api.closeReader(_id);
   }
 
@@ -126,7 +134,8 @@ class VideoReader {
   );
 }
 
-/// Encodes RGBA frames into an H.264 MP4.
+/// Encodes RGBA frames into an H.264 MP4. Always [finish] or [cancel] it: it
+/// holds a hardware encoder until then.
 class VideoWriter {
   VideoWriter._(
     this._id,
@@ -135,7 +144,13 @@ class VideoWriter {
     this._requestedWidth,
     this._requestedHeight,
     this.includesAudio,
-  );
+  ) {
+    _finalizer.attach(this, _id, detach: this);
+  }
+
+  // A safety net for abandoned writers: the file is unfinished, so cancel
+  // (delete) it. Finalizers aren't guaranteed to run.
+  static final _finalizer = Finalizer<int>((id) => VideoFrames.api.cancelWriter(id).ignore());
 
   final int _id;
 
@@ -187,6 +202,7 @@ class VideoWriter {
   Future<void> finish() {
     _checkOpen();
     _done = true;
+    _finalizer.detach(this);
     return VideoFrames.api.finishWriter(_id);
   }
 
@@ -194,6 +210,7 @@ class VideoWriter {
   Future<void> cancel() async {
     if (_done) return;
     _done = true;
+    _finalizer.detach(this);
     await VideoFrames.api.cancelWriter(_id);
   }
 

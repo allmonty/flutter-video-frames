@@ -9,7 +9,23 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoFramesHostApi {
   private let lock = NSLock()
 
   public static func register(with registrar: FlutterPluginRegistrar) {
-    VideoFramesHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: VideoFramesPlugin())
+    let instance = VideoFramesPlugin()
+    VideoFramesHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: instance)
+    // Published so the engine calls detachFromEngine(for:) on shutdown.
+    registrar.publish(instance)
+  }
+
+  /// Free every decoder and encoder still open when the engine goes away.
+  public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
+    VideoFramesHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: nil)
+    lock.lock()
+    let openReaders = readers.values
+    let openWriters = writers.values
+    readers.removeAll()
+    writers.removeAll()
+    lock.unlock()
+    openReaders.forEach { $0.close() }
+    openWriters.forEach { $0.cancel() }
   }
 
   private func reader(_ id: Int64) throws -> FrameReader {

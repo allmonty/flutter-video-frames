@@ -51,12 +51,21 @@ final writer = await VideoWriter.create(
   frameRate: reader.info.frameRate,
   audioSourcePath: reader.info.hasAudio ? inputPath : null,
 );
-VideoFrame? frame;
-while ((frame = await reader.nextFrame()) != null) {
-  await writer.addFrame(process(frame!.rgba), frame.pts);
+try {
+  VideoFrame? frame;
+  while ((frame = await reader.nextFrame()) != null) {
+    await writer.addFrame(process(frame!.rgba), frame.pts);
+  }
+  await writer.finish();
+} catch (_) {
+  await writer.cancel();   // deletes the partial file
+  rethrow;
+} finally {
+  await reader.close();
 }
-await writer.finish();   // or writer.cancel() to delete the partial file
-await reader.close();
+
+// Readers and writers hold hardware codecs, so always close them as above.
+// A forgotten one is freed when it's garbage-collected, but that may be late.
 
 // Scrubbing:
 final still = await reader.frameAt(const Duration(seconds: 3));

@@ -7,6 +7,9 @@
   seconds instead of hanging `addFrame` or `finish` forever.
 - iOS: a frame whose pixel memory can't be read or allocated now returns an
   error to Dart instead of crashing the app.
+- Readers and writers that are never closed are freed when garbage-collected
+  (a forgotten writer is cancelled). iOS now frees everything when the
+  Flutter engine shuts down, as Android already did.
 
 ## 0.3.0
 
