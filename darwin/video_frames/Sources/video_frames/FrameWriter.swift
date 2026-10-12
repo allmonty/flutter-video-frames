@@ -130,7 +130,9 @@ final class FrameWriter {
       }
       let done = DispatchSemaphore(value: 0)
       writer.finishWriting { done.signal() }
-      done.wait()
+      if done.wait(timeout: .now() + FrameWriter.finishTimeout) == .timedOut {
+        throw VideoFramesError.encoderStalled("finishing the file took over \(Int(FrameWriter.finishTimeout)) s")
+      }
       if writer.status != .completed {
         throw VideoFramesError.writeFailed(writer.error?.localizedDescription ?? "finish failed")
       }
@@ -147,15 +149,25 @@ final class FrameWriter {
     try? FileManager.default.removeItem(at: url)
   }
 
-  /// Offline encoding: poll until the input accepts more data.
+  /// Offline encoding: poll until the input accepts more data, failing
+  /// instead of waiting forever if the encoder stops making progress.
   private func waitUntilReady(_ input: AVAssetWriterInput) throws {
+    let deadline = Date().addingTimeInterval(FrameWriter.stallTimeout)
     while !input.isReadyForMoreMediaData {
       if writer.status == .failed {
         throw VideoFramesError.writeFailed(writer.error?.localizedDescription ?? "writer failed")
       }
+      if Date() > deadline {
+        throw VideoFramesError.encoderStalled("not ready for \(Int(FrameWriter.stallTimeout)) s")
+      }
       usleep(1_000)
     }
   }
+
+  /// Same limit as Android's encoder stall check.
+  static let stallTimeout: TimeInterval = 5
+  /// Writing the file's index at the end; generous, since it scales with length.
+  static let finishTimeout: TimeInterval = 60
 
   /// ~0.2 bits per pixel per frame: good quality for flat pixel art.
   static func defaultBitRate(width: Int, height: Int, frameRate: Double) -> Int {

@@ -7,6 +7,7 @@ enum VideoFramesError: Error, CustomStringConvertible {
   case fileNotFound(String)
   case noVideoTrack(String)
   case codecUnsupported(String)
+  case encoderStalled(String)
   case readFailed(String)
   case writeFailed(String)
 
@@ -16,6 +17,7 @@ enum VideoFramesError: Error, CustomStringConvertible {
     case .fileNotFound: return "fileNotFound"
     case .noVideoTrack: return "unsupportedFormat"
     case .codecUnsupported: return "codecUnsupported"
+    case .encoderStalled: return "encoderStalled"
     case .readFailed: return "readFailed"
     case .writeFailed: return "writeFailed"
     }
@@ -26,6 +28,7 @@ enum VideoFramesError: Error, CustomStringConvertible {
     case .fileNotFound(let path): return "no file at \(path)"
     case .noVideoTrack(let path): return "no video track in \(path)"
     case .codecUnsupported(let message): return message
+    case .encoderStalled(let message): return "video encoder stalled: \(message)"
     case .readFailed(let message): return "read failed: \(message)"
     case .writeFailed(let message): return "write failed: \(message)"
     }

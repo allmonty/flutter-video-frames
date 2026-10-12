@@ -1,3 +1,9 @@
+## Unreleased
+
+- iOS/macOS: a writer whose encoder stops accepting frames now fails with
+  `encoderStalled` after 5 seconds (or 60 seconds to finish the file)
+  instead of hanging forever, like Android.
+
 ## 1.0.0
 
 First release on pub.dev.
