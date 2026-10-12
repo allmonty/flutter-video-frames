@@ -1,17 +1,38 @@
-# video_frames_example
+# video_frames example
 
-Demonstrates how to use the video_frames plugin.
+A small app that does what the plugin is for: apply a filter to every frame
+of a video.
 
-## Getting Started
+1. **Pick video** opens the system file picker (`file_picker`).
+2. Choose **Grayscale** or **Invert**: the first frame is shown before and
+   after.
+3. **Export** reads every frame, filters its RGBA bytes, and writes a new MP4
+   with the original sound, showing progress. Decoding the next frame
+   overlaps encoding the current one.
+4. The result plays in the app (`video_player`).
 
-This project is a starting point for a Flutter application.
+The core loop, from [`lib/main.dart`](lib/main.dart):
 
-A few resources to get you started if this is your first Flutter project:
+```dart
+final reader = await VideoReader.open(input, maxDimension: 1280, filter: ScaleFilter.area);
+final writer = await VideoWriter.create(
+  output,
+  width: reader.info.width,
+  height: reader.info.height,
+  frameRate: reader.info.frameRate,
+  audioSourcePath: reader.info.audioCompatible ? input : null,
+);
+var next = reader.nextFrame();
+for (var frame = await next; frame != null; frame = await next) {
+  next = reader.nextFrame();
+  await writer.addFrame(filter.apply(frame.rgba), frame.pts);
+}
+await writer.finish();
+await reader.close();
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+The filters are plain functions over RGBA bytes in
+[`lib/filters.dart`](lib/filters.dart).
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Run it with `flutter run` on Android, iOS or macOS. `integration_test/`
+holds the plugin's device tests: `flutter test integration_test -d <device>`.
