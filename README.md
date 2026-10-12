@@ -126,7 +126,7 @@ Failures throw a `VideoFramesException` whose `code` says what happened:
 | `fileNotFound` | The input path doesn't exist. |
 | `unsupportedFormat` | The file isn't a video the platform can open. |
 | `codecUnsupported` | No codec on the device can handle it, e.g. HEVC without an HEVC encoder. Fall back to H.264. |
-| `encoderStalled` | The encoder stopped producing output (Android). |
+| `encoderStalled` | The encoder stopped producing output or accepting frames. |
 | `readFailed` | Decoding failed partway. |
 | `writeFailed` | Encoding or writing the file failed. |
 | `unknown` | Anything else. |

@@ -36,7 +36,6 @@ migrate_working_dir/
 # rules above are repeated).
 AGENTS.md
 CLAUDE.md
-plans/
 doc/
 tool/
 **/build/
