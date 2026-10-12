@@ -47,8 +47,9 @@ enum PixelConversion {
     dstWidth: Int,
     dstHeight: Int,
     filter: Filter = .nearest
-  ) -> [UInt8] {
-    var out = [UInt8](repeating: 0, count: dstWidth * dstHeight * 4)
+  ) -> Data {
+    // Data, not [UInt8]: the plugin hands it to Flutter without another copy.
+    var out = Data(count: dstWidth * dstHeight * 4)
     let rotW = rotation % 180 == 0 ? srcWidth : srcHeight
     let rotH = rotation % 180 == 0 ? srcHeight : srcWidth
     out.withUnsafeMutableBytes { dst in

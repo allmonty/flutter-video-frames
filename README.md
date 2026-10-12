@@ -88,6 +88,21 @@ pixel, best for large downscales like 4K to 720p):
 final reader = await VideoReader.open(path, maxDimension: 720, filter: ScaleFilter.area);
 ```
 
+## Memory
+
+Every frame is uncompressed RGBA, and it is copied a few times on its way
+between the platform and Dart:
+
+| Frame size | One frame |
+|---|---|
+| 720p | 3.7 MB |
+| 1080p | 8.3 MB |
+| 4K | 33 MB |
+
+For editing, open readers with `maxDimension: 1920` (or smaller) unless you
+target high-end devices; 4K frames can run mid-range Android phones out of
+memory.
+
 ## Audio
 
 `audioSourcePath` copies the source's audio track into the MP4 unchanged;

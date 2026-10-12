@@ -83,7 +83,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
       guard let frame = try reader.next() else { return nil }
       return VideoFrameMessage(
         ptsUs: frame.ptsUs, width: Int64(reader.width), height: Int64(reader.height),
-        rgba: FlutterStandardTypedData(bytes: Data(frame.rgba)))
+        rgba: FlutterStandardTypedData(bytes: frame.rgba))
     }
   }
 
@@ -93,7 +93,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
       let frame = try reader.frame(atUs: timeUs)
       return VideoFrameMessage(
         ptsUs: frame.ptsUs, width: Int64(reader.width), height: Int64(reader.height),
-        rgba: FlutterStandardTypedData(bytes: Data(frame.rgba)))
+        rgba: FlutterStandardTypedData(bytes: frame.rgba))
     }
   }
 

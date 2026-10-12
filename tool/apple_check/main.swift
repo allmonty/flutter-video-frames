@@ -41,7 +41,7 @@ let hevcFormat = AVURLAsset(url: URL(fileURLWithPath: hevcPath)).tracks(withMedi
 check(CMFormatDescriptionGetMediaSubType(hevcFormat) == kCMVideoCodecType_HEVC, "HEVC writer writes HEVC")
 let hevcReader = try FrameReader(path: hevcPath, maxDimension: nil)
 var hevcFrames = 0
-var hevcFirst: [UInt8]?
+var hevcFirst: Data?
 while let f = try hevcReader.next() { hevcFirst = hevcFirst ?? f.rgba; hevcFrames += 1 }
 check(hevcFrames == 10, "HEVC decoded \(hevcFrames) frames")
 check(hevcFirst![o] > 170 && hevcFirst![o + 1] < 100, "HEVC top-left is red")
@@ -75,7 +75,7 @@ for (q, (r, g, b)) in hdColors.enumerated() {
   check(abs(got.0 - Int(r)) <= 12 && abs(got.1 - Int(g)) <= 12 && abs(got.2 - Int(b)) <= 12, "HD color \((r, g, b)) -> \(got)")
 }
 var count = 0
-var first: [UInt8]? = nil
+var first: Data? = nil
 var lastPts: Int64 = -1
 while let f = try reader.next() { if first == nil { first = f.rgba }; check(f.ptsUs > lastPts, "pts increases \(f.ptsUs)"); lastPts = f.ptsUs; count += 1 }
 check(count == 30, "decoded \(count) frames")

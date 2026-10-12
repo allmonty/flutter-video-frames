@@ -109,7 +109,10 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
 
     /** One extractor + decoder + GL renderer over the video track. */
     private inner class Decoder {
-        private val pixels = ByteBuffer.allocateDirect(width * height * 4)
+        // One frame buffer per decoder, reused: Pigeon encodes (copies) the reply
+        // before the reader's serial queue runs the next call.
+        private val frame = ByteArray(width * height * 4)
+        private val pixels = ByteBuffer.wrap(frame)
         private val renderer = GlRenderer.forDecoding(width, height, filter, areaTaps, srcWidth, srcHeight)
         private val extractor = MediaExtractor()
         private val codec: MediaCodec = try {
@@ -232,8 +235,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
 
         private fun readRendered(): ByteArray {
             renderer.use { readFrame(rotation, pixels) }
-            pixels.rewind()
-            return ByteArray(pixels.capacity()).also { pixels.get(it) }
+            return frame
         }
 
         fun release() {

@@ -34,6 +34,10 @@
   HDR to SDR, plays Dolby Vision 8/9 (e.g. iPhone videos) through the HEVC/AVC
   base layer when there is no Dolby Vision decoder, and picks a decoder that
   supports the track's profile (e.g. 10-bit) instead of the default one.
+- Less copying per frame: Android reads GPU pixels straight into one reused
+  buffer per decoder instead of allocating a new array (plus a copy) per
+  frame; iOS builds frames as `Data`, dropping a full-frame copy in the
+  plugin. The README has a per-resolution memory table.
 
 ## 0.3.0
 

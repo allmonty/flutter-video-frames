@@ -111,7 +111,7 @@ final class FrameReader {
   }
 
   /// The next frame in presentation order, or nil at the end.
-  func next() throws -> (ptsUs: Int64, rgba: [UInt8])? {
+  func next() throws -> (ptsUs: Int64, rgba: Data)? {
     while let sample = output.copyNextSampleBuffer() {
       guard let pixels = CMSampleBufferGetImageBuffer(sample) else { continue }
       let pts = CMSampleBufferGetPresentationTimeStamp(sample)
@@ -125,7 +125,7 @@ final class FrameReader {
 
   /// The first frame at or after `timeUs` (the last frame when `timeUs` is
   /// past the end), upright, scaled and color-converted like `next()`.
-  func frame(atUs timeUs: Int64) throws -> (ptsUs: Int64, rgba: [UInt8]) {
+  func frame(atUs timeUs: Int64) throws -> (ptsUs: Int64, rgba: Data) {
     let target = CMTime(value: timeUs, timescale: 1_000_000)
     // Start a second before the end at the latest, so a time past the end
     // still finds the last frame.
@@ -151,7 +151,7 @@ final class FrameReader {
     reader.cancelReading()
   }
 
-  private func convert(_ pixels: CVPixelBuffer) throws -> [UInt8] {
+  private func convert(_ pixels: CVPixelBuffer) throws -> Data {
     CVPixelBufferLockBaseAddress(pixels, .readOnly)
     defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
     guard let base = CVPixelBufferGetBaseAddress(pixels) else {
