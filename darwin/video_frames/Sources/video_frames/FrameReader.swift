@@ -67,9 +67,10 @@ enum AudioSupport {
 
 /// Decodes a file's video track to upright RGBA frames (rotation metadata
 /// applied), optionally scaled down. Sequential frames come from one
-/// `AVAssetReader`; random access (`frame(atUs:)`) starts a short-lived one at
-/// the requested time, so both convert colors the same way (HDR included:
-/// AVFoundation tone-maps it to SDR).
+/// `AVAssetReader` (restarted by `seek(toUs:)`); random access
+/// (`frame(atUs:)`) starts a short-lived one at the requested time, so both
+/// convert colors the same way (HDR included: AVFoundation tone-maps it to
+/// SDR).
 final class FrameReader {
   let width: Int
   let height: Int
@@ -83,8 +84,10 @@ final class FrameReader {
 
   private let asset: AVURLAsset
   private let track: AVAssetTrack
-  private let reader: AVAssetReader
-  private let output: AVAssetReaderTrackOutput
+  private var reader: AVAssetReader
+  private var output: AVAssetReaderTrackOutput
+  /// After a seek, `next()` skips (without converting) frames before this.
+  private var skipBeforeUs: Int64?
   private let srcWidth: Int
   private let srcHeight: Int
   private let filter: PixelConversion.Filter
@@ -133,8 +136,10 @@ final class FrameReader {
   func next() throws -> (ptsUs: Int64, rgba: Data)? {
     while let sample = output.copyNextSampleBuffer() {
       guard let pixels = CMSampleBufferGetImageBuffer(sample) else { continue }
-      let pts = CMSampleBufferGetPresentationTimeStamp(sample)
-      return (Int64(CMTimeGetSeconds(pts) * 1_000_000), try convert(pixels))
+      let ptsUs = Int64(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample)) * 1_000_000)
+      if let skip = skipBeforeUs, ptsUs < skip { continue }
+      skipBeforeUs = nil
+      return (ptsUs, try convert(pixels))
     }
     if reader.status == .failed {
       throw VideoFramesError.readFailed(reader.error?.localizedDescription ?? "unknown error")
@@ -164,6 +169,16 @@ final class FrameReader {
     }
     guard let (pts, pixels) = last else { throw VideoFramesError.readFailed("no frame at \(timeUs) us") }
     return (Int64(CMTimeGetSeconds(pts) * 1_000_000), try convert(pixels))
+  }
+
+  /// Move the sequential position: the next `next()` returns the first
+  /// frame at or after `timeUs` (nil past the end). Doesn't affect
+  /// `frame(atUs:)`.
+  func seek(toUs timeUs: Int64) throws {
+    reader.cancelReading()
+    let start = CMTime(value: max(0, timeUs), timescale: 1_000_000)
+    (reader, output) = try FrameReader.startReading(asset, track, from: start)
+    skipBeforeUs = timeUs
   }
 
   func close() {

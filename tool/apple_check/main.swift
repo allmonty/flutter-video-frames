@@ -134,6 +134,15 @@ let mid = try reader.frame(atUs: 500_000)
 check(abs(mid.ptsUs - 500_000) < 40_000, "frameAt ~500ms: \(mid.ptsUs)")
 check(mid.rgba.count == w * h * 4, "frameAt size")
 check(mid.rgba[o] > 170 && mid.rgba[o + 1] < 100, "frameAt top-left red (upright)")
+try reader.seek(toUs: 500_000)
+var seeked: [Int64] = []
+while let f = try reader.next() { seeked.append(f.ptsUs) }
+check(seeked.first.map { $0 >= 500_000 && $0 < 540_000 } == true, "seek: next frame at ~500ms: \(seeked.first ?? -1)")
+check(seeked.count == 15 && zip(seeked, seeked.dropFirst()).allSatisfy { $0 < $1 }, "seek: then the rest in order (\(seeked.count))")
+try reader.seek(toUs: 0)
+check(try reader.next()?.ptsUs == 0, "seek back to the start")
+try reader.seek(toUs: 5_000_000)
+check(try reader.next() == nil, "seek past the end: no frame")
 reader.close()
 
 let scaled = try FrameReader(path: path, maxDimension: 160)
