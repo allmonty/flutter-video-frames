@@ -1,4 +1,6 @@
-## Unreleased
+## 1.0.0
+
+First release on pub.dev.
 
 - The example app now picks a video, applies a filter to every frame,
   exports it with the original sound and plays it. CI runs on GitHub Actions.

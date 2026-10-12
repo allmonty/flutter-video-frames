@@ -1,6 +1,6 @@
 name: video_frames
 description: "Decode video frames to RGBA and encode RGBA frames to H.264 or HEVC MP4 (audio copied through) on Android, iOS and macOS, with no FFmpeg."
-version: 0.3.0
+version: 1.0.0
 repository: https://github.com/allmonty/flutter-video-frames
 issue_tracker: https://github.com/allmonty/flutter-video-frames/issues
 topics: [video, video-processing, encoding, decoding, ffmpeg-alternative]
@@ -13,6 +13,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Imported by Pigeon's generated code (lib/src/messages.g.dart).
+  meta: ^1.15.0
 
 dev_dependencies:
   flutter_test:
