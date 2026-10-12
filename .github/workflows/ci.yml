@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Dart, Kotlin unit tests and formatting.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: flutter
+        # Same Flutter as local development (.tool-versions, e.g. "flutter 3.47.5-stable").
+        run: echo "version=$(awk '/^flutter/{print $2}' .tool-versions | sed 's/-stable$//')" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.flutter.outputs.version }}
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: flutter pub get
+      - run: flutter analyze
+      # Pigeon's generated files keep the generator's formatting.
+      - run: dart format --output=none --set-exit-if-changed $(git ls-files '*.dart' | grep -v '\.g\.dart$')
+      - run: flutter test
+      - working-directory: example
+        run: flutter pub get && flutter analyze && flutter test
+      - working-directory: example/android
+        run: ./gradlew :video_frames:testDebugUnitTest
+
+  # The Swift core against real AVFoundation, and the device tests natively on macOS.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: flutter
+        run: echo "version=$(awk '/^flutter/{print $2}' .tool-versions | sed 's/-stable$//')" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.flutter.outputs.version }}
+          channel: stable
+          cache: true
+      - run: tool/apple_check.sh
+      - working-directory: example
+        run: flutter test integration_test -d macos

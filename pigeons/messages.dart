@@ -106,7 +106,6 @@ abstract class VideoReaderHostApi {
 /// Encoding, on its own serial background queue.
 @HostApi()
 abstract class VideoWriterHostApi {
-
   /// Returns whether the audio of `audioSourcePath` will be copied; audio
   /// that can't go into an MP4 unchanged is dropped instead of failing.
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
