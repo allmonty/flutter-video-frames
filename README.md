@@ -172,7 +172,29 @@ nothing is re-encoded. Not every audio format fits an MP4:
 - When the audio doesn't fit, the writer drops it and still writes the
   video, silent, instead of failing.
 
-What counts as compatible depends on the platform:
+### Sound as PCM, and joining clips
+
+To change the sound rather than copy it, work on PCM:
+
+- `VideoFrames.decodeAudio(path)` decodes a file's first audio track (from a
+  video or an audio file: m4a, mp3, wav…) to `PcmAudio`: 16-bit samples,
+  channels interleaved, at the file's own rate and channel count. It returns
+  null when the file has no sound.
+- `VideoWriter.create(..., audio: pcm)` encodes `PcmAudio` to AAC in the
+  output, e.g. a mix of a clip's sound and a narration. Give `audio` or
+  `audioSourcePath`, not both.
+- `VideoFrames.concat(inputs, output)` joins MP4s of the same format (size,
+  codec, sound) one after another without re-encoding, e.g. clips made by
+  `VideoWriter` with the same settings.
+
+```dart
+final sound = await VideoFrames.decodeAudio(clipPath);
+final writer = await VideoWriter.create(outPath, width: 720, height: 1280, frameRate: 24, audio: sound);
+// ... addFrame ..., finish
+await VideoFrames.concat([shot1, shot2], episodePath);
+```
+
+What counts as compatible for `audioSourcePath` depends on the platform:
 
 - **Android:** `MediaMuxer` is asked directly, with a trial `addTrack` on a
   throwaway file. AAC always works; the accepted codecs vary by Android

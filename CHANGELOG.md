@@ -1,3 +1,12 @@
+## 1.2.0
+
+- `VideoFrames.decodeAudio(path)`: a file's audio as 16-bit PCM (`PcmAudio`),
+  at its own rate and channels; null when it has no sound.
+- `VideoWriter.create(audio: ...)`: encode PCM to AAC in the output, instead
+  of copying another file's track.
+- `VideoFrames.concat(inputs, output)`: join MP4s of the same format without
+  re-encoding.
+
 ## 1.1.1
 
 - iOS/macOS: `VideoWriter` with `audioSourcePath` no longer stalls
