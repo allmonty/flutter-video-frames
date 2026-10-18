@@ -212,5 +212,22 @@ do {
     let silent = try FrameReader(path: silentPath, maxDimension: nil)
     check(!silent.hasAudio && !silent.audioCompatible, "video saved without sound")
   }
+
+  // A real-length clip: AVAssetWriter interleaves audio with video, so it stops taking frames once the video is about
+  // a second ahead of the audio, and holds the last ones until the audio track is marked finished. Audio copied only
+  // at finish() stalled here.
+  let longPath = NSTemporaryDirectory() + "vf_long_audio.mp4"
+  let lw = try FrameWriter(
+    path: longPath, width: 720, height: 1280, frameRate: 24, bitRate: nil,
+    audioSourcePath: "example/integration_test/assets/tone8.mp4")
+  let gray = Data(repeating: 128, count: 720 * 1280 * 4)
+  let written = code {
+    for i in 0..<192 { try lw.addFrame(rgba: gray, ptsUs: Int64(i) * 1_000_000 / 24) }
+    return try lw.finish()
+  }
+  check(written == "no error", "8 s of 720x1280 frames with 8 s of audio: \(written)")
+  let long = AVURLAsset(url: URL(fileURLWithPath: longPath))
+  let audioSeconds = long.tracks(withMediaType: .audio).first.map { CMTimeGetSeconds($0.timeRange.duration) } ?? 0
+  check(abs(audioSeconds - 8) < 0.1, "the whole audio track copied: \(audioSeconds) s")
 }
 print("ALL PASSED")
