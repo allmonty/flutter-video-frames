@@ -24,6 +24,7 @@ cd example/android && ./gradlew :video_frames:testDebugUnitTest
 # Swift reader/writer against real AVFoundation on macOS, no device needed
 tool/apple_check.sh
 APPLE_CHECK_NO_ENCODER=1 tool/apple_check.sh   # only checks that need no encoder (what CI's macOS VM can run)
+xcrun swift tool/make_fixtures.swift example/integration_test/assets   # regenerate the test videos
 
 # Device tests (Android device/emulator, iOS, or natively on this Mac with -d macos)
 cd example && flutter test integration_test -d <device>
@@ -44,4 +45,5 @@ cd example && flutter test integration_test -d <device>
 - Rotation metadata is applied to decoded frames; reported `width`/`height` are post-rotation and post-scaling.
 - `VideoWriter` rounds size down to even numbers (H.264 requirement) and crops frames given at the requested size.
 - Audio is passthrough only (never re-encoded). If the source audio can't fit an MP4, the writer drops it and writes silent video rather than failing. `VideoInfo.audioCompatible` / `VideoWriter.includesAudio` expose this. Compatibility check: Android does a trial `MediaMuxer.addTrack` on a throwaway file; iOS uses `AVAssetWriter.canAdd`.
+- On iOS/macOS the audio is appended while the frames are written (in `addFrame`, whenever the video input is blocked), and its input is marked finished as soon as the source runs out. `AVAssetWriter` interleaves the tracks: audio copied only in `finish()` stalls the writer after about a second of video (`encoderStalled`). `tool/apple_check.sh` and the `tone8.mp4` device test catch it.
 - `writer.cancel()` deletes the partial output file.
