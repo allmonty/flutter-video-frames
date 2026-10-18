@@ -7,18 +7,20 @@ import java.io.File
  * Routes the Pigeon host APIs to [FrameReader]s and [FrameWriter]s by id.
  * Readers and writers run on two separate background queues.
  */
-class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi {
+class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi, MediaHostApi {
     private val readers = HashMap<Long, FrameReader>()
     private val writers = HashMap<Long, FrameWriter>()
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         VideoReaderHostApi.setUp(binding.binaryMessenger, this)
         VideoWriterHostApi.setUp(binding.binaryMessenger, this)
+        MediaHostApi.setUp(binding.binaryMessenger, this)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         VideoReaderHostApi.setUp(binding.binaryMessenger, null)
         VideoWriterHostApi.setUp(binding.binaryMessenger, null)
+        MediaHostApi.setUp(binding.binaryMessenger, null)
         synchronized(this) {
             readers.values.forEach { it.close() }
             writers.values.forEach { it.cancel() }
@@ -76,9 +78,11 @@ class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi 
         bitRate: Long?,
         audioSourcePath: String?,
         codec: VideoCodec,
+        audio: PcmAudioMessage?,
     ): Boolean {
         val writer = coded("writeFailed") {
-            FrameWriter(path, width.toInt(), height.toInt(), frameRate, bitRate?.toInt(), audioSourcePath, codec)
+            val pcm = audio?.let { Pcm(it.pcm, it.sampleRate.toInt(), it.channels.toInt()) }
+            FrameWriter(path, width.toInt(), height.toInt(), frameRate, bitRate?.toInt(), audioSourcePath, codec, pcm)
         }
         synchronized(this) { writers[writerId] = writer }
         return writer.audioIncluded
@@ -95,6 +99,18 @@ class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi 
 
     override fun cancelWriter(writerId: Long) {
         synchronized(this) { writers.remove(writerId) }?.cancel()
+    }
+
+    override fun decodeAudio(path: String): PcmAudioMessage? {
+        if (!File(path).isFile) throw FlutterError("fileNotFound", "no file at $path")
+        return coded("readFailed") {
+            AudioMedia.decode(path)?.let { PcmAudioMessage(it.data, it.sampleRate.toLong(), it.channels.toLong()) }
+        }
+    }
+
+    override fun concat(inputs: List<String>, output: String) {
+        for (path in inputs) if (!File(path).isFile) throw FlutterError("fileNotFound", "no file at $path")
+        coded("writeFailed") { AudioMedia.concat(inputs, output) }
     }
 
     /**

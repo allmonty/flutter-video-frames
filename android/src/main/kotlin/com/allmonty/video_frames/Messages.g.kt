@@ -351,6 +351,55 @@ data class VideoFrameMessage (
     return "VideoFrameMessage(ptsUs=$ptsUs, width=$width, height=$height, rgba=${rgba.contentToString()})"
   }
 }
+
+/**
+ * Raw sound: 16-bit signed little-endian PCM, channels interleaved.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class PcmAudioMessage (
+  val pcm: ByteArray,
+  val sampleRate: Long,
+  val channels: Long
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): PcmAudioMessage {
+      val pcm = pigeonVar_list[0] as ByteArray
+      val sampleRate = pigeonVar_list[1] as Long
+      val channels = pigeonVar_list[2] as Long
+      return PcmAudioMessage(pcm, sampleRate, channels)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      pcm,
+      sampleRate,
+      channels,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as PcmAudioMessage
+    return MessagesPigeonUtils.deepEquals(this.pcm, other.pcm) && MessagesPigeonUtils.deepEquals(this.sampleRate, other.sampleRate) && MessagesPigeonUtils.deepEquals(this.channels, other.channels)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.pcm)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.sampleRate)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.channels)
+    return result
+  }
+  override fun toString(): String {
+    return "PcmAudioMessage(pcm=${pcm.contentToString()}, sampleRate=$sampleRate, channels=$channels)"
+  }
+}
 private open class MessagesPigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
@@ -374,6 +423,11 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
           VideoFrameMessage.fromList(it)
         }
       }
+      133.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          PcmAudioMessage.fromList(it)
+        }
+      }
       else -> super.readValueOfType(type, buffer)
     }
   }
@@ -393,6 +447,10 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
       }
       is VideoFrameMessage -> {
         stream.write(132)
+        writeValue(stream, value.toList())
+      }
+      is PcmAudioMessage -> {
+        stream.write(133)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -535,8 +593,9 @@ interface VideoWriterHostApi {
   /**
    * Returns whether the audio of `audioSourcePath` will be copied; audio
    * that can't go into an MP4 unchanged is dropped instead of failing.
+   * `audio` (instead of `audioSourcePath`) is encoded to AAC.
    */
-  fun openWriter(writerId: Long, path: String, width: Long, height: Long, frameRate: Double, bitRate: Long?, audioSourcePath: String?, codec: VideoCodec): Boolean
+  fun openWriter(writerId: Long, path: String, width: Long, height: Long, frameRate: Double, bitRate: Long?, audioSourcePath: String?, codec: VideoCodec, audio: PcmAudioMessage?): Boolean
   fun addFrame(writerId: Long, rgba: ByteArray, ptsUs: Long)
   /** Flush, copy the audio track (if any) and close the file. */
   fun finishWriter(writerId: Long)
@@ -566,8 +625,9 @@ interface VideoWriterHostApi {
             val bitRateArg = args[5] as Long?
             val audioSourcePathArg = args[6] as String?
             val codecArg = args[7] as VideoCodec
+            val audioArg = args[8] as PcmAudioMessage?
             val wrapped: List<Any?> = try {
-              listOf(api.openWriter(writerIdArg, pathArg, widthArg, heightArg, frameRateArg, bitRateArg, audioSourcePathArg, codecArg))
+              listOf(api.openWriter(writerIdArg, pathArg, widthArg, heightArg, frameRateArg, bitRateArg, audioSourcePathArg, codecArg, audioArg))
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)
             }
@@ -623,6 +683,69 @@ interface VideoWriterHostApi {
             val writerIdArg = args[0] as Long
             val wrapped: List<Any?> = try {
               api.cancelWriter(writerIdArg)
+              listOf(null)
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+    }
+  }
+}
+/**
+ * Whole-file work (sound and joining), on its own serial background queue.
+ *
+ * Generated interface from Pigeon that represents a handler of messages from Flutter.
+ */
+interface MediaHostApi {
+  /**
+   * The first audio track of a file as PCM at its own rate and channels, or
+   * null when it has none.
+   */
+  fun decodeAudio(path: String): PcmAudioMessage?
+  /** Join MP4s of the same format one after another, without re-encoding. */
+  fun concat(inputs: List<String>, output: String)
+
+  companion object {
+    /** The codec used by MediaHostApi. */
+    val codec: MessageCodec<Any?> by lazy {
+      MessagesPigeonCodec()
+    }
+    /** Sets up an instance of `MediaHostApi` to handle messages through the `binaryMessenger`. */
+    @JvmOverloads
+    fun setUp(binaryMessenger: BinaryMessenger, api: MediaHostApi?, messageChannelSuffix: String = "") {
+      val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+      val taskQueue = binaryMessenger.makeBackgroundTaskQueue()
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.MediaHostApi.decodeAudio$separatedMessageChannelSuffix", codec, taskQueue)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val pathArg = args[0] as String
+            val wrapped: List<Any?> = try {
+              listOf(api.decodeAudio(pathArg))
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.video_frames.MediaHostApi.concat$separatedMessageChannelSuffix", codec, taskQueue)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val inputsArg = args[0] as List<String>
+            val outputArg = args[1] as String
+            val wrapped: List<Any?> = try {
+              api.concat(inputsArg, outputArg)
               listOf(null)
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)

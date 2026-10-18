@@ -1,6 +1,8 @@
 // Round trip on a real device or emulator:
 //   flutter test integration_test/plugin_integration_test.dart
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -434,6 +436,73 @@ void main() {
     expect(reader.info.hasAudio, isTrue);
     expect(reader.info.duration.inMilliseconds, closeTo(8000, 100));
     await reader.close();
+  });
+
+  testWidgets('sound decodes to PCM, PCM encodes to AAC, and clips join', (tester) async {
+    final dir = Directory.systemTemp.path;
+    final tone = File('$dir/video_frames_tone8_pcm.mp4')
+      ..writeAsBytesSync(
+        (await rootBundle.load('integration_test/assets/tone8.mp4')).buffer.asUint8List(),
+      );
+    final decoded = (await VideoFrames.decodeAudio(tone.path))!;
+    expect((decoded.sampleRate, decoded.channels), (44100, 1));
+    expect(decoded.duration.inMilliseconds, closeTo(8000, 100));
+    expect(decoded.samples.reduce((a, b) => a.abs() > b.abs() ? a : b).abs(), greaterThan(3000));
+
+    // Two 2 s clips, each with 2 s of a 48 kHz stereo tone encoded by the writer.
+    final pcm = Int16List(2 * 48000 * 2);
+    for (var i = 0; i < pcm.length; i++) {
+      pcm[i] = (8000 * sin(2 * pi * 440 * (i ~/ 2) / 48000)).round();
+    }
+    final clips = <String>[];
+    for (final name in ['a', 'b']) {
+      final path = '$dir/video_frames_pcm_$name.mp4';
+      final writer = await VideoWriter.create(
+        path,
+        width: 64,
+        height: 64,
+        frameRate: 24,
+        audio: PcmAudio(pcm, sampleRate: 48000, channels: 2),
+      );
+      expect(writer.includesAudio, isTrue);
+      for (var i = 0; i < 48; i++) {
+        await writer.addFrame(syntheticFrame(64, 64, i), Duration(microseconds: i * 1000000 ~/ 24));
+      }
+      await writer.finish();
+      clips.add(path);
+    }
+    final back = (await VideoFrames.decodeAudio(clips.first))!;
+    expect((back.sampleRate, back.channels), (48000, 2));
+    expect(back.duration.inMilliseconds, closeTo(2000, 100));
+
+    final joined = '$dir/video_frames_joined.mp4';
+    await VideoFrames.concat(clips, joined);
+    final reader = await VideoReader.open(joined);
+    expect(reader.info.hasAudio, isTrue);
+    expect(reader.info.duration.inMilliseconds, closeTo(4000, 150));
+    var frames = 0;
+    while (await reader.nextFrame() != null) {
+      frames++;
+    }
+    expect(frames, 96);
+    await reader.close();
+    expect((await VideoFrames.decodeAudio(joined))!.duration.inMilliseconds, closeTo(4000, 150));
+
+    final silent = '$dir/video_frames_silent.mp4';
+    final quiet = await VideoWriter.create(silent, width: 64, height: 64, frameRate: 24);
+    await quiet.addFrame(syntheticFrame(64, 64, 0), Duration.zero);
+    await quiet.finish();
+    expect(await VideoFrames.decodeAudio(silent), isNull);
+    await expectLater(
+      VideoFrames.decodeAudio('$dir/nope.mp4'),
+      throwsA(
+        isA<VideoFramesException>().having(
+          (e) => e.code,
+          'code',
+          VideoFramesErrorCode.fileNotFound,
+        ),
+      ),
+    );
   });
 
   testWidgets('cancel deletes the partial file', (tester) async {

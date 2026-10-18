@@ -229,5 +229,54 @@ do {
   let long = AVURLAsset(url: URL(fileURLWithPath: longPath))
   let audioSeconds = long.tracks(withMediaType: .audio).first.map { CMTimeGetSeconds($0.timeRange.duration) } ?? 0
   check(abs(audioSeconds - 8) < 0.1, "the whole audio track copied: \(audioSeconds) s")
+
+  // Sound as PCM: decoded from a file, encoded to AAC by the writer, and clips joined without re-encoding.
+  let decoded = try AudioMedia.decode(path: "example/integration_test/assets/tone8.mp4")!
+  let decodedSeconds = Double(decoded.data.count / 2 / decoded.channels) / Double(decoded.sampleRate)
+  check(decoded.sampleRate == 44_100 && decoded.channels == 1, "tone decoded at \(decoded.sampleRate) Hz, \(decoded.channels) ch")
+  check(abs(decodedSeconds - 8) < 0.1, "the whole tone decoded: \(decodedSeconds) s")
+  let peak = stride(from: 0, to: decoded.data.count - 1, by: 2).reduce(0) { m, i in
+    max(m, abs(Int(Int16(bitPattern: UInt16(decoded.data[i]) | UInt16(decoded.data[i + 1]) << 8))))
+  }
+  check(peak > 3000, "the tone is heard, not silence (peak \(peak))")
+  check(try AudioMedia.decode(path: path) == nil, "a video without sound decodes to nothing")
+  check(code { try AudioMedia.decode(path: "/nonexistent.mp4") as Any } == "fileNotFound", "decoding a missing file -> fileNotFound")
+
+  func pcmClip(_ name: String, seconds: Int, rate: Int, channels: Int) throws -> String {
+    var pcm = Data(count: seconds * rate * channels * 2)
+    pcm.withUnsafeMutableBytes { raw in
+      let samples = raw.bindMemory(to: Int16.self)
+      for i in 0..<samples.count { samples[i] = Int16(8000 * sin(Double(i / channels) * 2 * .pi * 440 / Double(rate))) }
+    }
+    let out = NSTemporaryDirectory() + name
+    let pw = try FrameWriter(
+      path: out, width: 64, height: 64, frameRate: 24, bitRate: nil, audioSourcePath: nil,
+      audio: Pcm(data: pcm, sampleRate: rate, channels: channels))
+    check(pw.audioIncluded, "\(name): the writer encodes the PCM")
+    for i in 0..<(seconds * 24) { try pw.addFrame(rgba: Data(repeating: UInt8(i % 256), count: 64 * 64 * 4), ptsUs: Int64(i) * 1_000_000 / 24) }
+    try pw.finish()
+    return out
+  }
+  let stereo = try pcmClip("vf_pcm_stereo.mp4", seconds: 3, rate: 48_000, channels: 2)
+  let mono = try pcmClip("vf_pcm_mono.mp4", seconds: 1, rate: 24_000, channels: 1)
+  for (clip, seconds) in [(stereo, 3.0), (mono, 1.0)] {
+    let a = AVURLAsset(url: URL(fileURLWithPath: clip)).tracks(withMediaType: .audio).first
+    let d = a.map { CMTimeGetSeconds($0.timeRange.duration) } ?? 0
+    check(abs(d - seconds) < 0.1, "PCM written as \(seconds) s of AAC: \(d) s")
+  }
+  let back = try AudioMedia.decode(path: stereo)!
+  check(back.sampleRate == 48_000 && back.channels == 2, "the AAC decodes back at 48 kHz stereo")
+
+  let joined = NSTemporaryDirectory() + "vf_joined.mp4"
+  try AudioMedia.concat(inputs: [stereo, stereo], output: joined)
+  let j = AVURLAsset(url: URL(fileURLWithPath: joined))
+  check(abs(CMTimeGetSeconds(j.duration) - 6) < 0.15, "two 3 s clips joined: \(CMTimeGetSeconds(j.duration)) s")
+  check(!j.tracks(withMediaType: .audio).isEmpty && !j.tracks(withMediaType: .video).isEmpty, "the join keeps picture and sound")
+  var joinedFrames = 0
+  let jr = try FrameReader(path: joined, maxDimension: nil)
+  while try jr.next() != nil { joinedFrames += 1 }
+  check(joinedFrames == 144, "every frame of both clips is there: \(joinedFrames)")
+  check(code { try AudioMedia.concat(inputs: [], output: joined) } == "writeFailed", "joining nothing -> writeFailed")
+  check(code { try AudioMedia.concat(inputs: ["/nonexistent.mp4"], output: joined) } == "fileNotFound", "joining a missing file -> fileNotFound")
 }
 print("ALL PASSED")

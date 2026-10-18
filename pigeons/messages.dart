@@ -79,6 +79,15 @@ class VideoFrameMessage {
   Uint8List rgba;
 }
 
+/// Raw sound: 16-bit signed little-endian PCM, channels interleaved.
+class PcmAudioMessage {
+  PcmAudioMessage({required this.pcm, required this.sampleRate, required this.channels});
+
+  Uint8List pcm;
+  int sampleRate;
+  int channels;
+}
+
 // Readers and writers are separate APIs so each gets its own serial
 // background queue: decoding one frame can run while another is encoded.
 // Neither blocks the platform's main thread. Readers and writers are
@@ -113,6 +122,7 @@ abstract class VideoReaderHostApi {
 abstract class VideoWriterHostApi {
   /// Returns whether the audio of `audioSourcePath` will be copied; audio
   /// that can't go into an MP4 unchanged is dropped instead of failing.
+  /// `audio` (instead of `audioSourcePath`) is encoded to AAC.
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
   bool openWriter(
     int writerId,
@@ -123,6 +133,7 @@ abstract class VideoWriterHostApi {
     int? bitRate,
     String? audioSourcePath,
     VideoCodec codec,
+    PcmAudioMessage? audio,
   );
 
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
@@ -135,4 +146,17 @@ abstract class VideoWriterHostApi {
   /// Stop and delete the partial file.
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
   void cancelWriter(int writerId);
+}
+
+/// Whole-file work (sound and joining), on its own serial background queue.
+@HostApi()
+abstract class MediaHostApi {
+  /// The first audio track of a file as PCM at its own rate and channels, or
+  /// null when it has none.
+  @TaskQueue(type: TaskQueueType.serialBackgroundThread)
+  PcmAudioMessage? decodeAudio(String path);
+
+  /// Join MP4s of the same format one after another, without re-encoding.
+  @TaskQueue(type: TaskQueueType.serialBackgroundThread)
+  void concat(List<String> inputs, String output);
 }

@@ -327,6 +327,53 @@ struct VideoFrameMessage: Hashable, CustomStringConvertible {
   }
 }
 
+/// Raw sound: 16-bit signed little-endian PCM, channels interleaved.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct PcmAudioMessage: Hashable, CustomStringConvertible {
+  var pcm: FlutterStandardTypedData
+  var sampleRate: Int64
+  var channels: Int64
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> PcmAudioMessage? {
+    let pcm = pigeonVar_list[0] as! FlutterStandardTypedData
+    let sampleRate = pigeonVar_list[1] as! Int64
+    let channels = pigeonVar_list[2] as! Int64
+
+    return PcmAudioMessage(
+      pcm: pcm,
+      sampleRate: sampleRate,
+      channels: channels
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      pcm,
+      sampleRate,
+      channels,
+    ]
+  }
+  static func == (lhs: PcmAudioMessage, rhs: PcmAudioMessage) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return MessagesPigeonInternal.deepEquals(lhs.pcm, rhs.pcm) && MessagesPigeonInternal.deepEquals(lhs.sampleRate, rhs.sampleRate) && MessagesPigeonInternal.deepEquals(lhs.channels, rhs.channels)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("PcmAudioMessage")
+    MessagesPigeonInternal.deepHash(value: pcm, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: sampleRate, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: channels, hasher: &hasher)
+  }
+
+  public var description: String {
+    return "PcmAudioMessage(pcm: \(String(describing: pcm)), sampleRate: \(String(describing: sampleRate)), channels: \(String(describing: channels)))"
+  }
+}
+
 private class MessagesPigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
@@ -346,6 +393,8 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
       return VideoInfoMessage.fromList(self.readValue() as! [Any?])
     case 132:
       return VideoFrameMessage.fromList(self.readValue() as! [Any?])
+    case 133:
+      return PcmAudioMessage.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -365,6 +414,9 @@ private class MessagesPigeonCodecWriter: FlutterStandardWriter {
       super.writeValue(value.toList())
     } else if let value = value as? VideoFrameMessage {
       super.writeByte(132)
+      super.writeValue(value.toList())
+    } else if let value = value as? PcmAudioMessage {
+      super.writeByte(133)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -516,7 +568,8 @@ class VideoReaderHostApiSetup {
 protocol VideoWriterHostApi {
   /// Returns whether the audio of `audioSourcePath` will be copied; audio
   /// that can't go into an MP4 unchanged is dropped instead of failing.
-  func openWriter(writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?, audioSourcePath: String?, codec: VideoCodec) throws -> Bool
+  /// `audio` (instead of `audioSourcePath`) is encoded to AAC.
+  func openWriter(writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?, audioSourcePath: String?, codec: VideoCodec, audio: PcmAudioMessage?) throws -> Bool
   func addFrame(writerId: Int64, rgba: FlutterStandardTypedData, ptsUs: Int64) throws
   /// Flush, copy the audio track (if any) and close the file.
   func finishWriter(writerId: Int64) throws
@@ -537,6 +590,7 @@ class VideoWriterHostApiSetup {
     #endif
     /// Returns whether the audio of `audioSourcePath` will be copied; audio
     /// that can't go into an MP4 unchanged is dropped instead of failing.
+    /// `audio` (instead of `audioSourcePath`) is encoded to AAC.
     let openWriterChannel = taskQueue == nil
       ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.openWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
       : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.VideoWriterHostApi.openWriter\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
@@ -551,8 +605,9 @@ class VideoWriterHostApiSetup {
         let bitRateArg: Int64? = nilOrValue(args[5])
         let audioSourcePathArg: String? = nilOrValue(args[6])
         let codecArg = args[7] as! VideoCodec
+        let audioArg: PcmAudioMessage? = nilOrValue(args[8])
         do {
-          let result = try api.openWriter(writerId: writerIdArg, path: pathArg, width: widthArg, height: heightArg, frameRate: frameRateArg, bitRate: bitRateArg, audioSourcePath: audioSourcePathArg, codec: codecArg)
+          let result = try api.openWriter(writerId: writerIdArg, path: pathArg, width: widthArg, height: heightArg, frameRate: frameRateArg, bitRate: bitRateArg, audioSourcePath: audioSourcePathArg, codec: codecArg, audio: audioArg)
           reply(wrapResult(result))
         } catch {
           reply(wrapError(error))
@@ -615,6 +670,68 @@ class VideoWriterHostApiSetup {
       }
     } else {
       cancelWriterChannel.setMessageHandler(nil)
+    }
+  }
+}
+/// Whole-file work (sound and joining), on its own serial background queue.
+///
+/// Generated protocol from Pigeon that represents a handler of messages from Flutter.
+protocol MediaHostApi {
+  /// The first audio track of a file as PCM at its own rate and channels, or
+  /// null when it has none.
+  func decodeAudio(path: String) throws -> PcmAudioMessage?
+  /// Join MP4s of the same format one after another, without re-encoding.
+  func concat(inputs: [String], output: String) throws
+}
+
+/// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
+class MediaHostApiSetup {
+  static var codec: FlutterStandardMessageCodec { MessagesPigeonCodec.shared }
+  /// Sets up an instance of `MediaHostApi` to handle messages through the `binaryMessenger`.
+  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: MediaHostApi?, messageChannelSuffix: String = "") {
+    let channelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
+    #if os(iOS)
+      let taskQueue = binaryMessenger.makeBackgroundTaskQueue?()
+    #else
+      let taskQueue: FlutterTaskQueue? = nil
+    #endif
+    /// The first audio track of a file as PCM at its own rate and channels, or
+    /// null when it has none.
+    let decodeAudioChannel = taskQueue == nil
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.MediaHostApi.decodeAudio\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.MediaHostApi.decodeAudio\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+    if let api = api {
+      decodeAudioChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let pathArg = args[0] as! String
+        do {
+          let result = try api.decodeAudio(path: pathArg)
+          reply(wrapResult(result))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      decodeAudioChannel.setMessageHandler(nil)
+    }
+    /// Join MP4s of the same format one after another, without re-encoding.
+    let concatChannel = taskQueue == nil
+      ? FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.MediaHostApi.concat\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+      : FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_frames.MediaHostApi.concat\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec, taskQueue: taskQueue)
+    if let api = api {
+      concatChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let inputsArg = args[0] as! [String]
+        let outputArg = args[1] as! String
+        do {
+          try api.concat(inputs: inputsArg, output: outputArg)
+          reply(wrapResult(nil))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      concatChannel.setMessageHandler(nil)
     }
   }
 }

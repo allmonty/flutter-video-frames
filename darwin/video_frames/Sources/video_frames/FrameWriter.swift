@@ -2,8 +2,9 @@ import AVFoundation
 import CoreMedia
 import CoreVideo
 
-/// Encodes RGBA frames to H.264 or HEVC in an MP4 with `AVAssetWriter`, optionally
-/// copying another file's audio track (passthrough, no re-encoding).
+/// Encodes RGBA frames to H.264 or HEVC in an MP4 with `AVAssetWriter`, with sound
+/// either copied from another file's audio track (passthrough, no re-encoding) or
+/// encoded to AAC from PCM.
 final class FrameWriter {
   private let url: URL
   private let width: Int
@@ -14,14 +15,16 @@ final class FrameWriter {
   private var audioInput: AVAssetWriterInput?
   private var audioReader: AVAssetReader?
   private var audioOutput: AVAssetReaderTrackOutput?
+  /// The PCM to encode, already cut into sample buffers; taken from the front.
+  private var pcmSamples: [CMSampleBuffer] = []
   private var audioDone = false
 
-  /// Whether the audio source's track will be copied.
-  var audioIncluded: Bool { audioReader != nil }
+  /// Whether the output gets sound: the audio source's track will be copied, or the PCM encoded.
+  var audioIncluded: Bool { audioReader != nil || !pcmSamples.isEmpty }
 
   init(
     path: String, width: Int, height: Int, frameRate: Double, bitRate: Int?, audioSourcePath: String?,
-    hevc: Bool = false
+    hevc: Bool = false, audio: Pcm? = nil
   ) throws {
     guard width % 2 == 0, height % 2 == 0 else {
       throw VideoFramesError.writeFailed("size must be even, got \(width)x\(height)")
@@ -79,6 +82,22 @@ final class FrameWriter {
         audioReader = reader
         audioOutput = output
       }
+    }
+
+    if let audio, !audio.data.isEmpty {
+      let settings: [String: Any] = [
+        // No bit rate: the encoder's default suits each rate (a fixed one is refused at 24 kHz mono).
+        AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: audio.sampleRate, AVNumberOfChannelsKey: audio.channels,
+      ]
+      guard writer.canApply(outputSettings: settings, forMediaType: .audio) else {
+        throw VideoFramesError.codecUnsupported(
+          "AAC at \(audio.sampleRate) Hz with \(audio.channels) channels is not supported on this device")
+      }
+      let input = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
+      input.expectsMediaDataInRealTime = false
+      writer.add(input)
+      audioInput = input
+      pcmSamples = try AudioMedia.sampleBuffers(audio)
     }
 
     guard writer.startWriting() else {
@@ -170,11 +189,12 @@ final class FrameWriter {
     }
   }
 
-  /// Append the source's next audio samples, as many as the audio input takes now.
+  /// Append the next audio samples (copied or encoded), as many as the audio input takes now.
   private func feedAudio() {
-    guard let input = audioInput, let output = audioOutput, !audioDone else { return }
+    guard let input = audioInput, !audioDone else { return }
     while input.isReadyForMoreMediaData {
-      guard let sample = output.copyNextSampleBuffer() else {
+      guard let sample = audioOutput?.copyNextSampleBuffer() ?? (pcmSamples.isEmpty ? nil : pcmSamples.removeFirst())
+      else {
         endAudio()
         return
       }

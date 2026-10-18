@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:video_frames/video_frames.dart';
@@ -71,11 +73,16 @@ class FakeWriterApi extends VideoWriterHostApi {
     double frameRate,
     int? bitRate,
     String? audioSourcePath,
-    VideoCodec codec,
-  ) async {
+    VideoCodec codec, [
+    PcmAudioMessage? audio,
+  ]) async {
     calls.add('writer $path ${width}x$height $frameRate $bitRate $audioSourcePath ${codec.name}');
     writerSizes[writerId] = (width, height);
     written[writerId] = [];
+    if (audio != null) {
+      calls.add('pcm ${audio.pcm.length} bytes ${audio.sampleRate} Hz ${audio.channels} ch');
+      return true;
+    }
     // Pretend '.pcm' sources hold audio that can't go into an MP4.
     return audioSourcePath != null && !audioSourcePath.endsWith('.pcm');
   }
@@ -92,6 +99,28 @@ class FakeWriterApi extends VideoWriterHostApi {
 
   @override
   Future<void> cancelWriter(int writerId) async => calls.add('cancel $writerId');
+}
+
+/// In-memory stand-in for the platform's whole-file side.
+class FakeMediaApi extends MediaHostApi {
+  FakeMediaApi(this.calls);
+
+  final List<String> calls;
+
+  @override
+  Future<PcmAudioMessage?> decodeAudio(String path) async {
+    calls.add('decode $path');
+    if (path.endsWith('silent.mp4')) return null;
+    return PcmAudioMessage(
+      pcm: Uint8List.fromList([1, 0, 255, 255, 0, 128]), // 1, -1, -32768 (little-endian)
+      sampleRate: 24000,
+      channels: 1,
+    );
+  }
+
+  @override
+  Future<void> concat(List<String> inputs, String output) async =>
+      calls.add('concat ${inputs.join(' + ')} -> $output');
 }
 
 /// A writer API whose addFrame fails the way the platform reports errors.
@@ -112,6 +141,7 @@ void main() {
     calls = [];
     VideoFrames.readerApi = FakeReaderApi(calls);
     VideoFrames.writerApi = writerApi = FakeWriterApi(calls);
+    VideoFrames.mediaApi = FakeMediaApi(calls);
   });
 
   group('VideoReader', () {
@@ -310,6 +340,57 @@ void main() {
           isA<VideoFramesException>().having((e) => e.code, 'code', VideoFramesErrorCode.unknown),
         ),
       );
+    });
+  });
+
+  group('sound and joining', () {
+    test('decodeAudio gives 16-bit samples with their rate and channels', () async {
+      final pcm = (await VideoFrames.decodeAudio('/v/tone.mp4'))!;
+      expect(pcm.samples, [1, -1, -32768]);
+      expect((pcm.sampleRate, pcm.channels), (24000, 1));
+      expect(pcm.duration, const Duration(microseconds: 125));
+      expect(await VideoFrames.decodeAudio('/v/silent.mp4'), isNull);
+    });
+
+    test('a writer encodes the PCM it is given', () async {
+      final audio = PcmAudio(Int16List.fromList([0, 1, 2, 3]), sampleRate: 48000, channels: 2);
+      final w = await VideoWriter.create(
+        '/out.mp4',
+        width: 4,
+        height: 4,
+        frameRate: 24,
+        audio: audio,
+      );
+      expect(w.includesAudio, isTrue);
+      expect(calls, contains('pcm 8 bytes 48000 Hz 2 ch'));
+      await w.addFrame(Uint8List(4 * 4 * 4), Duration.zero);
+      await w.finish();
+    });
+
+    test('a writer takes audio or an audio source, not both', () async {
+      final audio = PcmAudio(Int16List(2), sampleRate: 8000, channels: 1);
+      expect(
+        () => VideoWriter.create(
+          '/out.mp4',
+          width: 4,
+          height: 4,
+          frameRate: 24,
+          audio: audio,
+          audioSourcePath: '/in.mp4',
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('sound needs a rate and channels', () {
+      expect(() => PcmAudio(Int16List(0), sampleRate: 0, channels: 1), throwsArgumentError);
+      expect(() => PcmAudio(Int16List(0), sampleRate: 8000, channels: 0), throwsArgumentError);
+    });
+
+    test('concat joins in order, and needs something to join', () async {
+      await VideoFrames.concat(['/a.mp4', '/b.mp4'], '/ab.mp4');
+      expect(calls.last, 'concat /a.mp4 + /b.mp4 -> /ab.mp4');
+      expect(() => VideoFrames.concat([], '/x.mp4'), throwsArgumentError);
     });
   });
 }

@@ -267,6 +267,57 @@ class VideoFrameMessage {
   }
 }
 
+/// Raw sound: 16-bit signed little-endian PCM, channels interleaved.
+class PcmAudioMessage {
+  PcmAudioMessage({required this.pcm, required this.sampleRate, required this.channels});
+
+  Uint8List pcm;
+
+  int sampleRate;
+
+  int channels;
+
+  List<Object?> _toList() {
+    return <Object?>[pcm, sampleRate, channels];
+  }
+
+  Object encode() {
+    return _toList();
+  }
+
+  static PcmAudioMessage decode(Object result) {
+    result as List<Object?>;
+    return PcmAudioMessage(
+      pcm: result[0]! as Uint8List,
+      sampleRate: result[1]! as int,
+      channels: result[2]! as int,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! PcmAudioMessage || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(pcm, other.pcm) &&
+        _deepEquals(sampleRate, other.sampleRate) &&
+        _deepEquals(channels, other.channels);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+
+  @override
+  String toString() {
+    return 'PcmAudioMessage(pcm: $pcm, sampleRate: $sampleRate, channels: $channels)';
+  }
+}
+
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
   @override
@@ -286,6 +337,9 @@ class _PigeonCodec extends StandardMessageCodec {
     } else if (value is VideoFrameMessage) {
       buffer.putUint8(132);
       writeValue(buffer, value.encode());
+    } else if (value is PcmAudioMessage) {
+      buffer.putUint8(133);
+      writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
     }
@@ -304,6 +358,8 @@ class _PigeonCodec extends StandardMessageCodec {
         return VideoInfoMessage.decode(readValue(buffer)!);
       case 132:
         return VideoFrameMessage.decode(readValue(buffer)!);
+      case 133:
+        return PcmAudioMessage.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -451,6 +507,7 @@ class VideoWriterHostApi {
 
   /// Returns whether the audio of `audioSourcePath` will be copied; audio
   /// that can't go into an MP4 unchanged is dropped instead of failing.
+  /// `audio` (instead of `audioSourcePath`) is encoded to AAC.
   Future<bool> openWriter(
     int writerId,
     String path,
@@ -460,6 +517,7 @@ class VideoWriterHostApi {
     int? bitRate,
     String? audioSourcePath,
     VideoCodec codec,
+    PcmAudioMessage? audio,
   ) async {
     final pigeonVar_channelName =
         'dev.flutter.pigeon.video_frames.VideoWriterHostApi.openWriter$pigeonVar_messageChannelSuffix';
@@ -477,6 +535,7 @@ class VideoWriterHostApi {
       bitRate,
       audioSourcePath,
       codec,
+      audio,
     ]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
@@ -531,6 +590,59 @@ class VideoWriterHostApi {
       binaryMessenger: pigeonVar_binaryMessenger,
     );
     final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[writerId]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);
+  }
+}
+
+/// Whole-file work (sound and joining), on its own serial background queue.
+class MediaHostApi {
+  /// Constructor for [MediaHostApi]. The [binaryMessenger] named argument is
+  /// available for dependency injection. If it is left null, the default
+  /// BinaryMessenger will be used which routes to the host platform.
+  MediaHostApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
+    : pigeonVar_binaryMessenger = binaryMessenger,
+      pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty
+          ? '.$messageChannelSuffix'
+          : '';
+  final BinaryMessenger? pigeonVar_binaryMessenger;
+
+  static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
+
+  final String pigeonVar_messageChannelSuffix;
+
+  /// The first audio track of a file as PCM at its own rate and channels, or
+  /// null when it has none.
+  Future<PcmAudioMessage?> decodeAudio(String path) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.MediaHostApi.decodeAudio$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: true,
+    );
+    return pigeonVar_replyValue as PcmAudioMessage?;
+  }
+
+  /// Join MP4s of the same format one after another, without re-encoding.
+  Future<void> concat(List<String> inputs, String output) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.video_frames.MediaHostApi.concat$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[inputs, output]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     _extractReplyValueOrThrow(pigeonVar_replyList, pigeonVar_channelName, isNullValid: true);

@@ -10,9 +10,9 @@ import java.io.File
 import java.nio.ByteBuffer
 
 /**
- * Encodes RGBA frames to H.264 or HEVC in an MP4, optionally copying the audio track
- * of another file. Frames are drawn into the encoder's input surface by
- * [GlRenderer], with explicit timestamps.
+ * Encodes RGBA frames to H.264 or HEVC in an MP4, with sound either copied from
+ * another file's audio track or encoded to AAC from PCM. Frames are drawn into the
+ * encoder's input surface by [GlRenderer], with explicit timestamps.
  */
 class FrameWriter(
     private val path: String,
@@ -22,6 +22,7 @@ class FrameWriter(
     bitRate: Int?,
     audioSourcePath: String?,
     videoCodec: VideoCodec = VideoCodec.H264,
+    audio: Pcm? = null,
 ) {
     private val mime = if (videoCodec == VideoCodec.HEVC) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
 
@@ -68,17 +69,24 @@ class FrameWriter(
     private var muxerStarted = false
 
     private var audioExtractor: MediaExtractor? = null
+    private var encodedAudio: EncodedAudio? = null
     private var audioTrack = -1
     private var renderer: GlRenderer? = null
 
-    /** Whether the audio source's track will be copied (see [AudioSupport]). */
+    /** Whether the output gets sound: the audio source's track copied (see [AudioSupport]), or the PCM encoded. */
     val audioIncluded: Boolean
-        get() = audioExtractor != null
+        get() = audioExtractor != null || encodedAudio != null
 
     init {
         try {
             renderer = GlRenderer.forEncoding(inputSurface, width, height)
             if (audioSourcePath != null) openAudio(audioSourcePath)
+            if (audio != null && audio.data.isNotEmpty()) {
+                // Encoded now: the muxer needs the AAC track before it starts, at the video's first output.
+                val encoded = AudioMedia.encodeAac(audio)
+                audioTrack = muxer.addTrack(encoded.format)
+                encodedAudio = encoded
+            }
         } catch (e: Exception) {
             cancel()
             throw e
@@ -168,8 +176,9 @@ class FrameWriter(
     }
 
     private fun copyAudio() {
-        val extractor = audioExtractor ?: return
         if (!muxerStarted) return
+        encodedAudio?.samples?.forEach { (bytes, sample) -> muxer.writeSampleData(audioTrack, ByteBuffer.wrap(bytes), sample) }
+        val extractor = audioExtractor ?: return
         val buffer = ByteBuffer.allocate(1 shl 20)
         val sample = MediaCodec.BufferInfo()
         while (true) {
