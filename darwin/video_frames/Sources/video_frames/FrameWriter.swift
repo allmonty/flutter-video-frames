@@ -14,6 +14,7 @@ final class FrameWriter {
   private var audioInput: AVAssetWriterInput?
   private var audioReader: AVAssetReader?
   private var audioOutput: AVAssetReaderTrackOutput?
+  private var audioDone = false
 
   /// Whether the audio source's track will be copied.
   var audioIncluded: Bool { audioReader != nil }
@@ -84,13 +85,18 @@ final class FrameWriter {
       throw VideoFramesError.writeFailed(writer.error?.localizedDescription ?? "cannot start writing")
     }
     writer.startSession(atSourceTime: .zero)
+    // Audio is copied as the frames come in, not all at the end: AVAssetWriter interleaves the tracks, so it stops
+    // taking video once the video is about a second ahead of the audio.
+    if let reader = audioReader, !reader.startReading() { endAudio() }
   }
 
   func addFrame(rgba: Data, ptsUs: Int64) throws {
     guard rgba.count == width * height * 4 else {
       throw VideoFramesError.writeFailed("expected \(width * height * 4) bytes, got \(rgba.count)")
     }
-    try waitUntilReady(videoInput)
+    // A blocked video input is waiting for audio (it interleaves in chunks of about a second): give the audio input
+    // whatever it takes. Its own readiness keeps the audio from running far ahead.
+    try waitUntilReady(videoInput) { feedAudio() }
     guard let pool = adaptor.pixelBufferPool else {
       throw VideoFramesError.writeFailed(writer.error?.localizedDescription ?? "no pixel buffer pool")
     }
@@ -119,14 +125,12 @@ final class FrameWriter {
   func finish() throws {
     do {
       videoInput.markAsFinished()
-      if let input = audioInput, let reader = audioReader, let output = audioOutput {
-        if reader.startReading() {
-          while let sample = output.copyNextSampleBuffer() {
-            try waitUntilReady(input)
-            if !input.append(sample) { break }
-          }
+      if let input = audioInput {
+        // The rest of the audio, however long (it may outlast the video).
+        while !audioDone {
+          try waitUntilReady(input)
+          feedAudio()
         }
-        input.markAsFinished()
       }
       let done = DispatchSemaphore(value: 0)
       writer.finishWriting { done.signal() }
@@ -151,9 +155,11 @@ final class FrameWriter {
 
   /// Offline encoding: poll until the input accepts more data, failing
   /// instead of waiting forever if the encoder stops making progress.
-  private func waitUntilReady(_ input: AVAssetWriterInput) throws {
+  /// `whileWaiting` runs on each poll, e.g. to feed the other track the writer is waiting for.
+  private func waitUntilReady(_ input: AVAssetWriterInput, whileWaiting: () -> Void = {}) throws {
     let deadline = Date().addingTimeInterval(FrameWriter.stallTimeout)
     while !input.isReadyForMoreMediaData {
+      whileWaiting()
       if writer.status == .failed {
         throw VideoFramesError.writeFailed(writer.error?.localizedDescription ?? "writer failed")
       }
@@ -162,6 +168,29 @@ final class FrameWriter {
       }
       usleep(1_000)
     }
+  }
+
+  /// Append the source's next audio samples, as many as the audio input takes now.
+  private func feedAudio() {
+    guard let input = audioInput, let output = audioOutput, !audioDone else { return }
+    while input.isReadyForMoreMediaData {
+      guard let sample = output.copyNextSampleBuffer() else {
+        endAudio()
+        return
+      }
+      if !input.append(sample) {
+        audioDone = true  // the writer failed; the next wait reports its error
+        return
+      }
+    }
+  }
+
+  /// Mark the audio track finished as soon as the source runs out: until then the writer can't tell it ended, and
+  /// holds the last video frames back waiting for more audio.
+  private func endAudio() {
+    guard !audioDone else { return }
+    audioDone = true
+    audioInput?.markAsFinished()
   }
 
   /// Same limit as Android's encoder stall check.

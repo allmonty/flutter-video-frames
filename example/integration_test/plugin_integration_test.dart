@@ -407,6 +407,35 @@ void main() {
     expect(await codeOf(VideoReader.open(notVideo.path)), VideoFramesErrorCode.unsupportedFormat);
   });
 
+  testWidgets('a real-length clip keeps all of its source audio', (tester) async {
+    // 8 s at 720x1280 with 8 s of AAC: on Apple, audio copied only at finish() used to stall the
+    // writer after about a second (AVAssetWriter interleaves the tracks).
+    final dir = Directory.systemTemp.path;
+    final source = File('$dir/video_frames_tone8.mp4')
+      ..writeAsBytesSync(
+        (await rootBundle.load('integration_test/assets/tone8.mp4')).buffer.asUint8List(),
+      );
+    final path = '$dir/video_frames_long_audio.mp4';
+    final writer = await VideoWriter.create(
+      path,
+      width: 720,
+      height: 1280,
+      frameRate: 24,
+      audioSourcePath: source.path,
+    );
+    expect(writer.includesAudio, isTrue);
+    final gray = Uint8List(720 * 1280 * 4)..fillRange(0, 720 * 1280 * 4, 128);
+    for (var i = 0; i < 192; i++) {
+      await writer.addFrame(gray, Duration(microseconds: i * 1000000 ~/ 24));
+    }
+    await writer.finish();
+
+    final reader = await VideoReader.open(path);
+    expect(reader.info.hasAudio, isTrue);
+    expect(reader.info.duration.inMilliseconds, closeTo(8000, 100));
+    await reader.close();
+  });
+
   testWidgets('cancel deletes the partial file', (tester) async {
     final path = '${Directory.systemTemp.path}/video_frames_cancel.mp4';
     final writer = await VideoWriter.create(path, width: 64, height: 64, frameRate: 30);

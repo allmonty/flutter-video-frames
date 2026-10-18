@@ -1,3 +1,10 @@
+## 1.1.1
+
+- iOS/macOS: `VideoWriter` with `audioSourcePath` no longer stalls
+  (`encoderStalled`) on videos longer than about a second. The audio is now
+  copied while the frames are written, as AVAssetWriter needs, instead of
+  all at the end.
+
 ## 1.1.0
 
 - `VideoReader.seek(time)` moves `nextFrame()`'s position: the next frame is

@@ -4,10 +4,12 @@
 // - colors709.mp4: 1280x720 tagged BT.709; quadrants green, skin tone, red, blue.
 // - hlg.mp4: 640x360 HEVC Main10, HLG / BT.2020 (HDR) made from SDR quadrants
 //   green, skin tone, red, gray.
+// - tone8.mp4: 64x64 gray with 8 s of mono 44.1 kHz AAC (a 440 Hz tone): an audio source longer than the
+//   ~1 s AVAssetWriter interleaves by.
 import AVFoundation
 import VideoToolbox
 
-func write(_ path: String, _ w: Int, _ h: Int, _ colors: [(UInt8, UInt8, UInt8)], rotated: Bool = false, hdr: Bool = false) {
+func write(_ path: String, _ w: Int, _ h: Int, _ colors: [(UInt8, UInt8, UInt8)], rotated: Bool = false, hdr: Bool = false, toneSeconds: Int = 0) {
   let out = URL(fileURLWithPath: path)
   try? FileManager.default.removeItem(at: out)
   let writer = try! AVAssetWriter(outputURL: out, fileType: .mp4)
@@ -31,6 +33,9 @@ func write(_ path: String, _ w: Int, _ h: Int, _ colors: [(UInt8, UInt8, UInt8)]
     kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
     kCVPixelBufferWidthKey as String: w, kCVPixelBufferHeightKey as String: h])
   writer.add(input)
+  let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+    AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 32000])
+  if toneSeconds > 0 { writer.add(audio) }
   writer.startWriting(); writer.startSession(atSourceTime: .zero)
   for i in 0..<15 {
     while !input.isReadyForMoreMediaData { usleep(1000) }
@@ -52,12 +57,42 @@ func write(_ path: String, _ w: Int, _ h: Int, _ colors: [(UInt8, UInt8, UInt8)]
     adaptor.append(pb!, withPresentationTime: CMTime(value: Int64(i), timescale: 30))
   }
   input.markAsFinished()
+  // The 0.5 s of video is under the interleave chunk, so the video never waits for this audio.
+  if toneSeconds > 0 { appendTone(audio, seconds: toneSeconds); audio.markAsFinished() }
   let done = DispatchSemaphore(value: 0)
   writer.finishWriting { done.signal() }; done.wait()
   print(path, writer.status == .completed ? "ok" : "failed \(String(describing: writer.error))")
+}
+
+func appendTone(_ input: AVAssetWriterInput, seconds: Int) {
+  let rate = 44100, chunk = 4410
+  var pcmFormat = AudioStreamBasicDescription(
+    mSampleRate: Float64(rate), mFormatID: kAudioFormatLinearPCM,
+    mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked, mBytesPerPacket: 2,
+    mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1, mBitsPerChannel: 16, mReserved: 0)
+  var format: CMAudioFormatDescription?
+  CMAudioFormatDescriptionCreate(
+    allocator: nil, asbd: &pcmFormat, layoutSize: 0, layout: nil, magicCookieSize: 0, magicCookie: nil,
+    extensions: nil, formatDescriptionOut: &format)
+  for start in stride(from: 0, to: seconds * rate, by: chunk) {
+    var pcm = (0..<chunk).map { Int16(8000 * sin(2 * Double.pi * 440 * Double(start + $0) / Double(rate))) }
+    var block: CMBlockBuffer?
+    CMBlockBufferCreateWithMemoryBlock(
+      allocator: nil, memoryBlock: nil, blockLength: chunk * 2, blockAllocator: nil, customBlockSource: nil,
+      offsetToData: 0, dataLength: chunk * 2, flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block)
+    CMBlockBufferReplaceDataBytes(with: &pcm, blockBuffer: block!, offsetIntoDestination: 0, dataLength: chunk * 2)
+    var sample: CMSampleBuffer?
+    CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+      allocator: nil, dataBuffer: block!, formatDescription: format!, sampleCount: chunk,
+      presentationTimeStamp: CMTime(value: Int64(start), timescale: Int32(rate)), packetDescriptions: nil,
+      sampleBufferOut: &sample)
+    while !input.isReadyForMoreMediaData { usleep(1000) }
+    input.append(sample!)
+  }
 }
 
 let dir = CommandLine.arguments[1]
 write("\(dir)/rotated90.mp4", 128, 64, [(220, 40, 40), (40, 220, 40), (40, 40, 220), (220, 220, 220)], rotated: true)
 write("\(dir)/colors709.mp4", 1280, 720, [(40, 200, 60), (224, 172, 140), (200, 40, 40), (40, 60, 200)])
 write("\(dir)/hlg.mp4", 640, 360, [(40, 200, 60), (224, 172, 140), (200, 40, 40), (128, 128, 128)], hdr: true)
+write("\(dir)/tone8.mp4", 64, 64, [(128, 128, 128), (128, 128, 128), (128, 128, 128), (128, 128, 128)], toneSeconds: 8)
