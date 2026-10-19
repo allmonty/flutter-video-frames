@@ -5,7 +5,7 @@
 - `VideoWriter.create(audio: ...)`: encode PCM to AAC in the output, instead
   of copying another file's track.
 - `VideoFrames.concat(inputs, output)`: join MP4s of the same format without
-  re-encoding.
+  re-encoding; clips of another format throw `writeFailed`.
 
 ## 1.1.1
 

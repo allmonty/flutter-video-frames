@@ -1,5 +1,5 @@
-/// Decode video frames to RGBA and encode RGBA frames to H.264 or HEVC MP4 (with the
-/// source's audio copied through), on Android, iOS and macOS.
+/// Decode video frames to RGBA and encode RGBA frames to H.264 or HEVC MP4 (with
+/// audio copied from a file or encoded from PCM), and join clips, on Android, iOS and macOS.
 ///
 /// Every call runs on a background queue on the platform side, and the API
 /// also works from background isolates (initialize

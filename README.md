@@ -179,13 +179,15 @@ To change the sound rather than copy it, work on PCM:
 - `VideoFrames.decodeAudio(path)` decodes a file's first audio track (from a
   video or an audio file: m4a, mp3, wav…) to `PcmAudio`: 16-bit samples,
   channels interleaved, at the file's own rate and channel count. It returns
-  null when the file has no sound.
+  null when the file has no sound. The whole track is held in memory: about
+  11 MB per minute at 48 kHz stereo, and copied on its way to Dart.
 - `VideoWriter.create(..., audio: pcm)` encodes `PcmAudio` to AAC in the
   output, e.g. a mix of a clip's sound and a narration. Give `audio` or
   `audioSourcePath`, not both.
 - `VideoFrames.concat(inputs, output)` joins MP4s of the same format (size,
   codec, sound) one after another without re-encoding, e.g. clips made by
-  `VideoWriter` with the same settings.
+  `VideoWriter` with the same settings. Clips of another size or sound
+  format throw `writeFailed`, and `output` can't be one of the inputs.
 
 ```dart
 final sound = await VideoFrames.decodeAudio(clipPath);
@@ -234,6 +236,8 @@ H.264 then.
 | Seek (`seek`) | The sequential decoder seeks to the previous sync frame; frames before the target are dropped unrendered | The sequential `AVAssetReader` restarts at the requested time; earlier samples are skipped unconverted |
 | Encode | RGBA drawn with OpenGL ES into a `MediaCodec` H.264/HEVC encoder's input surface (the first encoder that starts, hardware first), explicit timestamps, `MediaMuxer` | `AVAssetWriter` + pixel-buffer adaptor, converted with vImage |
 | Audio | Samples copied through `MediaExtractor` → `MediaMuxer` | Passthrough `AVAssetReaderTrackOutput` → `AVAssetWriterInput`, interleaved with the frames as they're added |
+| PCM | Decoded with `MediaCodec`; encoded to AAC all at once before the frames, then muxed with them | `AVAssetReaderTrackOutput` to 16-bit PCM; encoded to AAC by an `AVAssetWriterInput`, interleaved with the frames |
+| `concat` | Samples copied through `MediaExtractor` → `MediaMuxer`, each clip's timestamps shifted by the clips before it | `AVMutableComposition` exported with `AVAssetExportPresetPassthrough` |
 
 On iOS and macOS the plugin shares one Swift implementation, with both Swift Package Manager (`darwin/video_frames/Package.swift`) and CocoaPods (`darwin/video_frames.podspec`). The sources are in `darwin/video_frames/Sources/video_frames/`. On Android it follows Flutter 3.47's plugin template: AGP 9, with the JVM target set through `kotlin { compilerOptions }`.
 
