@@ -7,7 +7,7 @@
 /// Routes the Pigeon host APIs to `FrameReader`s and `FrameWriter`s by id.
 /// Pigeon runs reader calls and writer calls on two separate serial
 /// background queues.
-public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi {
+public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi, MediaHostApi {
   private var readers: [Int64: FrameReader] = [:]
   private var writers: [Int64: FrameWriter] = [:]
   private let lock = NSLock()
@@ -16,6 +16,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
     let instance = VideoFramesPlugin()
     VideoReaderHostApiSetup.setUp(binaryMessenger: messenger(registrar), api: instance)
     VideoWriterHostApiSetup.setUp(binaryMessenger: messenger(registrar), api: instance)
+    MediaHostApiSetup.setUp(binaryMessenger: messenger(registrar), api: instance)
     // Published so the engine calls detachFromEngine(for:) on shutdown.
     registrar.publish(instance)
   }
@@ -33,6 +34,7 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
   public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
     VideoReaderHostApiSetup.setUp(binaryMessenger: VideoFramesPlugin.messenger(registrar), api: nil)
     VideoWriterHostApiSetup.setUp(binaryMessenger: VideoFramesPlugin.messenger(registrar), api: nil)
+    MediaHostApiSetup.setUp(binaryMessenger: VideoFramesPlugin.messenger(registrar), api: nil)
     lock.lock()
     let openReaders = readers.values
     let openWriters = writers.values
@@ -127,12 +129,13 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
 
   func openWriter(
     writerId: Int64, path: String, width: Int64, height: Int64, frameRate: Double, bitRate: Int64?,
-    audioSourcePath: String?, codec: VideoCodec
+    audioSourcePath: String?, codec: VideoCodec, audio: PcmAudioMessage?
   ) throws -> Bool {
     try bridged("writeFailed") {
       let writer = try FrameWriter(
         path: path, width: Int(width), height: Int(height), frameRate: frameRate,
-        bitRate: bitRate.map { Int($0) }, audioSourcePath: audioSourcePath, hevc: codec == .hevc)
+        bitRate: bitRate.map { Int($0) }, audioSourcePath: audioSourcePath, hevc: codec == .hevc,
+        audio: audio.map { Pcm(data: $0.pcm.data, sampleRate: Int($0.sampleRate), channels: Int($0.channels)) })
       lock.lock()
       writers[writerId] = writer
       lock.unlock()
@@ -159,5 +162,18 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
     let writer = writers.removeValue(forKey: writerId)
     lock.unlock()
     writer?.cancel()
+  }
+
+  func decodeAudio(path: String) throws -> PcmAudioMessage? {
+    try bridged("readFailed") {
+      try AudioMedia.decode(path: path).map {
+        PcmAudioMessage(
+          pcm: FlutterStandardTypedData(bytes: $0.data), sampleRate: Int64($0.sampleRate), channels: Int64($0.channels))
+      }
+    }
+  }
+
+  func concat(inputs: [String], output: String) throws {
+    try bridged("writeFailed") { try AudioMedia.concat(inputs: inputs, output: output) }
   }
 }

@@ -1,11 +1,12 @@
-/// Decode video frames to RGBA and encode RGBA frames to H.264 or HEVC MP4 (with the
-/// source's audio copied through), on Android, iOS and macOS.
+/// Decode video frames to RGBA and encode RGBA frames to H.264 or HEVC MP4 (with
+/// audio copied from a file or encoded from PCM), and join clips, on Android, iOS and macOS.
 ///
 /// Every call runs on a background queue on the platform side, and the API
 /// also works from background isolates (initialize
 /// `BackgroundIsolateBinaryMessenger` first).
 library;
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
@@ -129,6 +130,36 @@ class VideoFrame {
   final Uint8List rgba;
 }
 
+/// Raw sound: 16-bit signed PCM samples, channels interleaved.
+class PcmAudio {
+  /// `samples` at `sampleRate` Hz, `channels` interleaved (1 mono, 2 stereo).
+  PcmAudio(this.samples, {required this.sampleRate, required this.channels}) {
+    if (sampleRate <= 0 || channels <= 0) {
+      throw ArgumentError('sound needs a sample rate and channels, got $sampleRate Hz, $channels');
+    }
+  }
+
+  /// The samples, `channels` per frame.
+  final Int16List samples;
+
+  /// Frames per second.
+  final int sampleRate;
+
+  /// Samples per frame.
+  final int channels;
+
+  /// How long it plays.
+  Duration get duration => Duration(
+    microseconds: samples.length ~/ channels * Duration.microsecondsPerSecond ~/ sampleRate,
+  );
+
+  PcmAudioMessage _message() => PcmAudioMessage(
+    pcm: samples.buffer.asUint8List(samples.offsetInBytes, samples.lengthInBytes),
+    sampleRate: sampleRate,
+    channels: channels,
+  );
+}
+
 /// Entry point: holds the host API (swappable in tests).
 abstract final class VideoFrames {
   /// The platform decoding API; replace it with a fake in tests (see
@@ -140,7 +171,35 @@ abstract final class VideoFrames {
   /// decoding and encoding can overlap); replace it with a fake in tests.
   @visibleForTesting
   static VideoWriterHostApi writerApi = VideoWriterHostApi();
+
+  /// The platform's whole-file API (sound and joining, on its own queue); replace it with a fake in tests.
+  @visibleForTesting
+  static MediaHostApi mediaApi = MediaHostApi();
   static int _nextId = 1;
+
+  /// The first audio track of the file at `path`, decoded to 16-bit PCM at its own rate and channels, or null when
+  /// it has no sound. Works for videos and for audio files (m4a, mp3, wav…).
+  static Future<PcmAudio?> decodeAudio(String path) async {
+    final m = await _guard(mediaApi.decodeAudio(path));
+    if (m == null) return null;
+    final bytes = m.pcm;
+    final samples = bytes.offsetInBytes.isEven
+        ? bytes.buffer.asInt16List(bytes.offsetInBytes, bytes.lengthInBytes ~/ 2)
+        : Int16List.sublistView(Uint8List.fromList(bytes));
+    return PcmAudio(samples, sampleRate: m.sampleRate, channels: m.channels);
+  }
+
+  /// Join MP4s of the same format (size, codec, sound) one after another into `output`, without re-encoding:
+  /// e.g. clips made by [VideoWriter] with the same settings. `output` (overwritten) can't be one of the inputs.
+  static Future<void> concat(List<String> inputs, String output) {
+    if (inputs.isEmpty) throw ArgumentError('nothing to join');
+    // The output is opened first, so joining into one of the inputs would wipe it before it's read.
+    if (File(output).existsSync() &&
+        inputs.any((i) => File(i).existsSync() && FileSystemEntity.identicalSync(i, output))) {
+      throw ArgumentError('output is one of the inputs: $output');
+    }
+    return _guard(mediaApi.concat(inputs, output));
+  }
 
   static int _id() => _nextId++;
 }
@@ -266,15 +325,17 @@ class VideoWriter {
   final int _requestedWidth;
   final int _requestedHeight;
 
-  /// Whether the audio source's track is being copied. False when no audio
-  /// source was given, it has no audio, or its format can't go into an MP4
-  /// unchanged (the video is still written, silent).
+  /// Whether the video gets sound: the audio source's track is being
+  /// copied, or `audio` encoded. False when neither was given, the source
+  /// has no audio, or its format can't go into an MP4 unchanged (the video
+  /// is still written, silent).
   final bool includesAudio;
   bool _done = false;
 
   /// Create `path` (overwritten if it exists). With `audioSourcePath` (a
   /// file path, like [VideoReader.open]'s), that file's audio track is
-  /// copied into the output when [finish] is called.
+  /// copied into the output unchanged; with `audio` instead, that sound is
+  /// encoded to AAC (e.g. a mix made from [VideoFrames.decodeAudio]'s PCM).
   /// [VideoCodec.hevc] makes smaller files but fails on devices without an
   /// HEVC encoder; fall back to [VideoCodec.h264] when it throws.
   static Future<VideoWriter> create(
@@ -285,14 +346,28 @@ class VideoWriter {
     int? bitRate,
     String? audioSourcePath,
     VideoCodec codec = VideoCodec.h264,
+    PcmAudio? audio,
   }) async {
     final w = width & ~1, h = height & ~1;
     if (w < 2 || h < 2) throw ArgumentError('video must be at least 2x2, got ${width}x$height');
+    if (audio != null && audioSourcePath != null) {
+      throw ArgumentError('give audio or audioSourcePath, not both');
+    }
     final id = VideoFrames._id();
-    final audio = await _guard(
-      VideoFrames.writerApi.openWriter(id, path, w, h, frameRate, bitRate, audioSourcePath, codec),
+    final included = await _guard(
+      VideoFrames.writerApi.openWriter(
+        id,
+        path,
+        w,
+        h,
+        frameRate,
+        bitRate,
+        audioSourcePath,
+        codec,
+        audio?._message(),
+      ),
     );
-    return VideoWriter._(id, w, h, width, height, audio);
+    return VideoWriter._(id, w, h, width, height, included);
   }
 
   /// Append a frame (RGBA, `width * height * 4` bytes, or the requested

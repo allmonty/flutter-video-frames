@@ -10,7 +10,7 @@ mkdir -p "$out"
 # must not rerun it and report a stale pass.
 rm -f "$out/check"
 xcrun swiftc -O -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
-  $src/PixelConversion.swift $src/FrameReader.swift $src/FrameWriter.swift \
+  $src/PixelConversion.swift $src/FrameReader.swift $src/FrameWriter.swift $src/AudioMedia.swift \
   tool/apple_check/main.swift -o "$out/check" 2>&1 | grep -v "warning\|^ *[0-9]* |\|^ *|\|^$" || true
 [ -x "$out/check" ] || { echo "FAIL build (see errors above)"; exit 1; }
 if "$out/check" > "$out/log" 2>&1; then
