@@ -51,6 +51,17 @@ let rot270 = bgra.withUnsafeBufferPointer { PixelConversion.bgraToRgba($0.baseAd
 check(rot270[2] == 255 && rot270[(3 * 2) * 4] == 255, "rotate 270: top is blue, bottom is red")
 check(PixelConversion.rotationDegrees(a: 0, b: 1) == 90 && PixelConversion.rotationDegrees(a: -1, b: 0) == 180 && PixelConversion.rotationDegrees(a: 0, b: -1) == 270, "rotation from transform")
 
+// Sound decodes to PCM (decoding needs no encoder).
+let decoded = try AudioMedia.decode(path: "example/integration_test/assets/tone8.mp4")!
+let decodedSeconds = Double(decoded.data.count / 2 / decoded.channels) / Double(decoded.sampleRate)
+check(decoded.sampleRate == 44_100 && decoded.channels == 1, "tone decoded at \(decoded.sampleRate) Hz, \(decoded.channels) ch")
+check(abs(decodedSeconds - 8) < 0.1, "the whole tone decoded: \(decodedSeconds) s")
+let peak = stride(from: 0, to: decoded.data.count - 1, by: 2).reduce(0) { m, i in
+  max(m, abs(Int(Int16(bitPattern: UInt16(decoded.data[i]) | UInt16(decoded.data[i + 1]) << 8))))
+}
+check(peak > 3000, "the tone is heard, not silence (peak \(peak))")
+check(code { try AudioMedia.decode(path: "/nonexistent.mp4") as Any } == "fileNotFound", "decoding a missing file -> fileNotFound")
+
 // Everything below needs a working video encoder. GitHub's macOS runners are
 // VMs without the Mac's media engine (encoding never starts there), so CI sets
 // APPLE_CHECK_NO_ENCODER and runs only the checks above.
@@ -230,17 +241,8 @@ do {
   let audioSeconds = long.tracks(withMediaType: .audio).first.map { CMTimeGetSeconds($0.timeRange.duration) } ?? 0
   check(abs(audioSeconds - 8) < 0.1, "the whole audio track copied: \(audioSeconds) s")
 
-  // Sound as PCM: decoded from a file, encoded to AAC by the writer, and clips joined without re-encoding.
-  let decoded = try AudioMedia.decode(path: "example/integration_test/assets/tone8.mp4")!
-  let decodedSeconds = Double(decoded.data.count / 2 / decoded.channels) / Double(decoded.sampleRate)
-  check(decoded.sampleRate == 44_100 && decoded.channels == 1, "tone decoded at \(decoded.sampleRate) Hz, \(decoded.channels) ch")
-  check(abs(decodedSeconds - 8) < 0.1, "the whole tone decoded: \(decodedSeconds) s")
-  let peak = stride(from: 0, to: decoded.data.count - 1, by: 2).reduce(0) { m, i in
-    max(m, abs(Int(Int16(bitPattern: UInt16(decoded.data[i]) | UInt16(decoded.data[i + 1]) << 8))))
-  }
-  check(peak > 3000, "the tone is heard, not silence (peak \(peak))")
+  // Sound as PCM, encoded to AAC by the writer, and clips joined without re-encoding.
   check(try AudioMedia.decode(path: path) == nil, "a video without sound decodes to nothing")
-  check(code { try AudioMedia.decode(path: "/nonexistent.mp4") as Any } == "fileNotFound", "decoding a missing file -> fileNotFound")
 
   func pcmClip(_ name: String, seconds: Int, rate: Int, channels: Int) throws -> String {
     var pcm = Data(count: seconds * rate * channels * 2)
