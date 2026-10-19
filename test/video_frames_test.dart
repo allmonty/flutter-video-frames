@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
@@ -391,6 +392,17 @@ void main() {
       await VideoFrames.concat(['/a.mp4', '/b.mp4'], '/ab.mp4');
       expect(calls.last, 'concat /a.mp4 + /b.mp4 -> /ab.mp4');
       expect(() => VideoFrames.concat([], '/x.mp4'), throwsArgumentError);
+    });
+
+    test('concat refuses to write over one of its inputs', () {
+      final dir = Directory.systemTemp.createTempSync('video_frames_concat');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final a = File('${dir.path}/a.mp4')..writeAsBytesSync([1]);
+      expect(
+        () => VideoFrames.concat([a.path, '/b.mp4'], '${dir.path}/./a.mp4'),
+        throwsArgumentError,
+      );
+      expect(a.readAsBytesSync(), [1]);
     });
   });
 }

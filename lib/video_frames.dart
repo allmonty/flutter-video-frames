@@ -6,6 +6,7 @@
 /// `BackgroundIsolateBinaryMessenger` first).
 library;
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
@@ -189,9 +190,14 @@ abstract final class VideoFrames {
   }
 
   /// Join MP4s of the same format (size, codec, sound) one after another into `output`, without re-encoding:
-  /// e.g. clips made by [VideoWriter] with the same settings.
+  /// e.g. clips made by [VideoWriter] with the same settings. `output` (overwritten) can't be one of the inputs.
   static Future<void> concat(List<String> inputs, String output) {
     if (inputs.isEmpty) throw ArgumentError('nothing to join');
+    // The output is opened first, so joining into one of the inputs would wipe it before it's read.
+    if (File(output).existsSync() &&
+        inputs.any((i) => File(i).existsSync() && FileSystemEntity.identicalSync(i, output))) {
+      throw ArgumentError('output is one of the inputs: $output');
+    }
     return _guard(mediaApi.concat(inputs, output));
   }
 
