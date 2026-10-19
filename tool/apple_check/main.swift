@@ -276,6 +276,7 @@ do {
   let jr = try FrameReader(path: joined, maxDimension: nil)
   while try jr.next() != nil { joinedFrames += 1 }
   check(joinedFrames == 144, "every frame of both clips is there: \(joinedFrames)")
+  check(code { try AudioMedia.concat(inputs: [stereo, mono], output: joined) } == "writeFailed", "joining 48 kHz stereo to 24 kHz mono -> writeFailed")
   check(code { try AudioMedia.concat(inputs: [], output: joined) } == "writeFailed", "joining nothing -> writeFailed")
   check(code { try AudioMedia.concat(inputs: ["/nonexistent.mp4"], output: joined) } == "fileNotFound", "joining a missing file -> fileNotFound")
 }

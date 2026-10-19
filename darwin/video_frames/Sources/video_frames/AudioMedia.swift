@@ -102,6 +102,10 @@ enum AudioMedia {
       try composition.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: asset, at: cursor)
       cursor = CMTimeAdd(cursor, asset.duration)
     }
+    // A clip of another format lands in a track of its own, which players and readers skip.
+    guard composition.tracks.count == Set(composition.tracks.map(\.mediaType)).count else {
+      throw VideoFramesError.writeFailed("these videos aren't all the same format")
+    }
     guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
       throw VideoFramesError.writeFailed("these videos can't be joined without re-encoding")
     }

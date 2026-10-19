@@ -157,13 +157,17 @@ object AudioMedia {
         var started = false
         try {
             val tracks = linkedMapOf<String, Int>() // "video" / "audio" → the output's track, from the first input
+            val shapes = hashMapOf<String, List<Any?>>()
             val first = MediaExtractor()
             try {
                 first.setDataSource(inputs[0])
                 for (i in 0 until first.trackCount) {
                     val format = first.getTrackFormat(i)
                     val kind = format.getString(MediaFormat.KEY_MIME)?.substringBefore('/') ?: continue
-                    if ((kind == "video" || kind == "audio") && kind !in tracks) tracks[kind] = muxer.addTrack(format)
+                    if ((kind == "video" || kind == "audio") && kind !in tracks) {
+                        tracks[kind] = muxer.addTrack(format)
+                        shapes[kind] = shape(format)
+                    }
                 }
             } finally {
                 first.release()
@@ -184,6 +188,8 @@ object AudioMedia {
                         } ?: continue
                         extractor.selectTrack(i)
                         val format = extractor.getTrackFormat(i)
+                        // MediaMuxer takes any samples, so a clip of another size or rate would play back broken.
+                        require(shape(format) == shapes[kind]) { "$path has a different $kind format than ${inputs[0]}" }
                         var lastUs = 0L
                         while (true) {
                             val size = extractor.readSampleData(buffer, 0)
@@ -211,4 +217,9 @@ object AudioMedia {
             muxer.release()
         }
     }
+
+    /** What two tracks must share for one's samples to play in the other. */
+    private fun shape(f: MediaFormat): List<Any?> =
+        listOf(MediaFormat.KEY_WIDTH, MediaFormat.KEY_HEIGHT, MediaFormat.KEY_SAMPLE_RATE, MediaFormat.KEY_CHANNEL_COUNT)
+            .map { if (f.containsKey(it)) f.getInteger(it) else null } + f.getString(MediaFormat.KEY_MIME)
 }

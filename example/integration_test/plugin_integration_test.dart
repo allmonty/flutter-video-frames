@@ -493,6 +493,18 @@ void main() {
     await quiet.addFrame(syntheticFrame(64, 64, 0), Duration.zero);
     await quiet.finish();
     expect(await VideoFrames.decodeAudio(silent), isNull);
+
+    final small = '$dir/video_frames_small.mp4';
+    final tiny = await VideoWriter.create(small, width: 32, height: 32, frameRate: 24);
+    await tiny.addFrame(syntheticFrame(32, 32, 0), Duration.zero);
+    await tiny.finish();
+    // MediaMuxer would mix the formats in one track, AVMutableComposition split them: both unplayable.
+    await expectLater(
+      VideoFrames.concat([clips.first, small], '$dir/video_frames_mixed.mp4'),
+      throwsA(
+        isA<VideoFramesException>().having((e) => e.code, 'code', VideoFramesErrorCode.writeFailed),
+      ),
+    );
     await expectLater(
       VideoFrames.decodeAudio('$dir/nope.mp4'),
       throwsA(
