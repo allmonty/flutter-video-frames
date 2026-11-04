@@ -22,6 +22,7 @@ class FrameReader(
     private val maxDimension: Int?,
     private val filter: ScaleFilter,
     private val upscale: Boolean = false,
+    private val sharpen: Double = 0.0,
 ) {
     private var sequential: Decoder? = null
     private var seeker: Decoder? = null
@@ -134,7 +135,7 @@ class FrameReader(
         // before the reader's serial queue runs the next call.
         private val frame = ByteArray(width * height * 4)
         private val pixels = ByteBuffer.wrap(frame)
-        private val renderer = GlRenderer.forDecoding(width, height, filter, areaTaps, srcWidth, srcHeight)
+        private val renderer = GlRenderer.forDecoding(width, height, filter, areaTaps, srcWidth, srcHeight, sharpen)
         private val extractor = MediaExtractor()
         /** e.g. "c2.goldfish.hevc.decoder (video/hevc 640x360)", for error messages; set by openCodec. */
         private var description = "video decoder"

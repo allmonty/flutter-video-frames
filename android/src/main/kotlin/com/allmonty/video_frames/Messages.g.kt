@@ -479,7 +479,7 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
  * Generated interface from Pigeon that represents a handler of messages from Flutter.
  */
 interface VideoReaderHostApi {
-  fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter, upscale: Boolean): VideoInfoMessage
+  fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter, upscale: Boolean, sharpen: Double): VideoInfoMessage
   /** The next frame in presentation order, or null at the end. */
   fun nextFrame(readerId: Long): VideoFrameMessage?
   /**
@@ -514,8 +514,9 @@ interface VideoReaderHostApi {
             val maxDimensionArg = args[2] as Long?
             val filterArg = args[3] as ScaleFilter
             val upscaleArg = args[4] as Boolean
+            val sharpenArg = args[5] as Double
             val wrapped: List<Any?> = try {
-              listOf(api.openReader(readerIdArg, pathArg, maxDimensionArg, filterArg, upscaleArg))
+              listOf(api.openReader(readerIdArg, pathArg, maxDimensionArg, filterArg, upscaleArg, sharpenArg))
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)
             }

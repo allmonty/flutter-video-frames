@@ -64,6 +64,19 @@ check(slope(.bicubic) > slope(.bilinear) && slope(.lanczos) > slope(.bilinear),
   "steeper than bilinear (\(slope(.bilinear))): bicubic \(slope(.bicubic)), lanczos \(slope(.lanczos))")
 check(low(.lanczos) <= low(.bicubic) && low(.bicubic) < 64 && low(.bilinear) == 64,
   "overshoot below 64: lanczos \(low(.lanczos)), bicubic \(low(.bicubic)), bilinear \(low(.bilinear))")
+// Sharpen: a flat color stays, an edge gains contrast, 0 changes nothing, alpha is kept.
+func sharpened(_ row: [UInt8], _ amount: Double, alpha: UInt8 = 255) -> [Int] {
+  var data = Data((0..<3).flatMap { _ in row.flatMap { [$0, $0, $0, alpha] } })
+  PixelConversion.sharpen(&data, width: row.count, height: 3, amount: amount)
+  return (0..<row.count).map { Int(data[(row.count + $0) * 4]) } + [Int(data[3])]
+}
+check(sharpened([100, 100, 100, 100, 100], 0.8).dropLast().allSatisfy { $0 == 100 }, "sharpen: a flat color stays flat")
+let soft: [UInt8] = [64, 64, 80, 128, 176, 192, 192]
+let crisp = sharpened(soft, 0.8)
+check(crisp[2] < 80 && crisp[4] > 176 && crisp[3] == 128, "sharpen steepens an edge: \(crisp)")
+check(sharpened(soft, 0).dropLast() == soft.map { Int($0) }, "sharpen 0 changes nothing")
+check(sharpened(soft, 0.8, alpha: 7).last == 7, "sharpen keeps alpha")
+
 // Speed: a 480x854 frame enlarged to 1080x1920.
 let big480 = [UInt8](repeating: 128, count: 480 * 854 * 4)
 for filter in [PixelConversion.Filter.bilinear, .bicubic, .lanczos] {
@@ -75,6 +88,11 @@ for filter in [PixelConversion.Filter.bilinear, .bicubic, .lanczos] {
   let ms = Int(Date().timeIntervalSince(start) * 1000)
   check(ms < 1000, "\(filter): 480x854 to 1080x1920 in \(ms) ms")
 }
+var frame1080 = Data(repeating: 128, count: 1080 * 1920 * 4)
+let sharpenStart = Date()
+PixelConversion.sharpen(&frame1080, width: 1080, height: 1920, amount: 0.8)
+let sharpenMs = Int(Date().timeIntervalSince(sharpenStart) * 1000)
+check(sharpenMs < 1000, "sharpen a 1080x1920 frame in \(sharpenMs) ms")
 
 // Rotation mapping on a synthetic BGRA buffer: 4x2, left half red, right blue.
 var bgra = [UInt8](repeating: 0, count: 4 * 2 * 4)

@@ -114,6 +114,7 @@ abstract class VideoReaderHostApi {
     int? maxDimension,
     ScaleFilter filter,
     bool upscale,
+    double sharpen,
   );
 
   /// The next frame in presentation order, or null at the end.

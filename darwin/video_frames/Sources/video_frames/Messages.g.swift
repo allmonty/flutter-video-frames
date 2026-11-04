@@ -451,7 +451,7 @@ class MessagesPigeonCodec: FlutterStandardMessageCodec, @unchecked Sendable {
 ///
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
 protocol VideoReaderHostApi {
-  func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter, upscale: Bool) throws -> VideoInfoMessage
+  func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter, upscale: Bool, sharpen: Double) throws -> VideoInfoMessage
   /// The next frame in presentation order, or null at the end.
   func nextFrame(readerId: Int64) throws -> VideoFrameMessage?
   /// The frame closest to `timeUs`, for scrubbing. Doesn't move the
@@ -485,8 +485,9 @@ class VideoReaderHostApiSetup {
         let maxDimensionArg: Int64? = nilOrValue(args[2])
         let filterArg = args[3] as! ScaleFilter
         let upscaleArg = args[4] as! Bool
+        let sharpenArg = args[5] as! Double
         do {
-          let result = try api.openReader(readerId: readerIdArg, path: pathArg, maxDimension: maxDimensionArg, filter: filterArg, upscale: upscaleArg)
+          let result = try api.openReader(readerId: readerIdArg, path: pathArg, maxDimension: maxDimensionArg, filter: filterArg, upscale: upscaleArg, sharpen: sharpenArg)
           reply(wrapResult(result))
         } catch {
           reply(wrapError(error))

@@ -255,6 +255,51 @@ enum PixelConversion {
     }
   }
 
+  /// Unsharp mask on tightly packed RGBA, in place: each color channel moves
+  /// `amount` times away from its 5x5 Gaussian blur ([1 4 6 4 1] / 16 per
+  /// axis, edges clamped). Alpha is left as it is.
+  static func sharpen(_ rgba: inout Data, width: Int, height: Int, amount: Double) {
+    guard amount > 0, width > 0, height > 0 else { return }
+    let taps: [Float] = [1, 4, 6, 4, 1]
+    let stride = width * 4
+    var rows = [Float](repeating: 0, count: stride * height)
+    var blur = [Float](repeating: 0, count: stride * height)
+    let a = Float(amount)
+    rgba.withUnsafeMutableBytes { raw in
+      let px = raw.bindMemory(to: UInt8.self)
+      rows.withUnsafeMutableBufferPointer { r in
+        blur.withUnsafeMutableBufferPointer { b in
+          // Rows, then columns: 5 + 5 taps instead of 25.
+          for y in 0..<height {
+            let line = y * stride
+            for x in 0..<width {
+              for c in 0..<3 {
+                var sum: Float = 0
+                for k in 0..<5 { sum += taps[k] * Float(px[line + min(max(x + k - 2, 0), width - 1) * 4 + c]) }
+                r[line + x * 4 + c] = sum
+              }
+            }
+          }
+          for y in 0..<height {
+            let line = y * stride
+            for k in 0..<5 {
+              let source = min(max(y + k - 2, 0), height - 1) * stride
+              let w = taps[k]
+              for j in 0..<stride { b[line + j] += w * r[source + j] }
+            }
+          }
+          for i in 0..<(width * height) {
+            for c in 0..<3 {
+              let o = i * 4 + c
+              let v = Float(px[o])
+              px[o] = UInt8(min(max((v + a * (v - b[o] / 256)).rounded(), 0), 255))
+            }
+          }
+        }
+      }
+    }
+  }
+
   /// Full-size path with Accelerate: rotate clockwise by `rotation`, then
   /// swap BGRA to RGBA (or back; the swap is its own inverse) in place, with
   /// opaque alpha. `dst` is `width x height`, tightly packed.

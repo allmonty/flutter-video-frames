@@ -16,7 +16,8 @@ import java.nio.ByteOrder
  * conversion, rotation and scaling:
  *
  * - [forDecoding]: the decoder renders into [surface]; [readFrame] draws its
- *   latest frame upright into an offscreen framebuffer and reads it back as RGBA.
+ *   latest frame upright into an offscreen framebuffer and reads it back as RGBA
+ *   (with `sharpen`, through a second framebuffer and an unsharp-mask pass).
  *   The external-texture sampler converts with the stream's own color space.
  * - [forEncoding]: [writeFrame] uploads RGBA and draws it into the encoder's
  *   input surface; the encoder converts to YUV.
@@ -32,6 +33,7 @@ class GlRenderer private constructor(
     private val taps: Int = 1,
     private val srcWidth: Int = 0,
     private val srcHeight: Int = 0,
+    private val sharpen: Double = 0.0,
 ) {
     private val decoding = window == null
     private val display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
@@ -41,6 +43,11 @@ class GlRenderer private constructor(
     private var program = 0
     private var texture = 0
     private var framebuffer = 0
+
+    /** With `sharpen`: the scaled frame is drawn here first, then sharpened into [framebuffer]. */
+    private var scaledFramebuffer = 0
+    private var scaledTexture = 0
+    private var sharpenProgram = 0
     private val texMatrix = FloatArray(16).also { android.opengl.Matrix.setIdentityM(it, 0) }
     private val quad = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
@@ -115,6 +122,19 @@ class GlRenderer private constructor(
             GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, output, 0)
             val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
             check(status == GLES20.GL_FRAMEBUFFER_COMPLETE) { "framebuffer incomplete: 0x${Integer.toHexString(status)}" }
+            if (sharpen > 0) {
+                sharpenProgram = buildProgram(VERTEX_SHADER, FRAGMENT_2D_SHARPEN)
+                scaledTexture = genTexture(GLES20.GL_TEXTURE_2D, GLES20.GL_NEAREST)
+                GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+                GLES20.glGenFramebuffers(1, ids, 0)
+                scaledFramebuffer = ids[0]
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, scaledFramebuffer)
+                GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, scaledTexture, 0)
+                val scaledStatus = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
+                check(scaledStatus == GLES20.GL_FRAMEBUFFER_COMPLETE) {
+                    "framebuffer incomplete: 0x${Integer.toHexString(scaledStatus)}"
+                }
+            }
         } else {
             GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
         }
@@ -143,7 +163,7 @@ class GlRenderer private constructor(
         val st = surfaceTexture!!
         st.updateTexImage()
         st.getTransformMatrix(texMatrix)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, framebuffer)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, if (sharpen > 0) scaledFramebuffer else framebuffer)
         val quad = decodeQuad(rotation)
         if (filter == ScaleFilter.AREA) setAreaUniforms(quad)
         if (filter in TEXEL_FILTERS) {
@@ -151,6 +171,13 @@ class GlRenderer private constructor(
             GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "uSrcSize"), srcWidth.toFloat(), srcHeight.toFloat())
         }
         draw(quad)
+        if (sharpen > 0) {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, framebuffer)
+            GLES20.glUseProgram(sharpenProgram)
+            GLES20.glUniform2f(GLES20.glGetUniformLocation(sharpenProgram, "uTexel"), 1f / width, 1f / height)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(sharpenProgram, "uAmount"), sharpen.toFloat())
+            draw(IDENTITY_QUAD, sharpenProgram, GLES20.GL_TEXTURE_2D, scaledTexture, IDENTITY)
+        }
         out.clear()
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, out)
         checkGl("readPixels")
@@ -202,12 +229,18 @@ class GlRenderer private constructor(
         }
     }
 
-    private fun draw(vertices: FloatArray) {
+    private fun draw(
+        vertices: FloatArray,
+        program: Int = this.program,
+        target: Int = this.target,
+        texture: Int = this.texture,
+        matrix: FloatArray = texMatrix,
+    ) {
         GLES20.glViewport(0, 0, width, height)
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(target, texture)
-        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uTexMatrix"), 1, false, texMatrix, 0)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uTexMatrix"), 1, false, matrix, 0)
         quad.clear()
         quad.put(vertices)
         val pos = GLES20.glGetAttribLocation(program, "aPos")
@@ -270,8 +303,15 @@ class GlRenderer private constructor(
         /** Area filtering averages up to this many bilinear taps per axis, covering 2 texels each. */
         const val MAX_AREA_TAPS = 8
 
-        fun forDecoding(width: Int, height: Int, filter: ScaleFilter, taps: Int, srcWidth: Int, srcHeight: Int) =
-            GlRenderer(null, width, height, filter, taps, srcWidth, srcHeight)
+        fun forDecoding(
+            width: Int,
+            height: Int,
+            filter: ScaleFilter,
+            taps: Int,
+            srcWidth: Int,
+            srcHeight: Int,
+            sharpen: Double = 0.0,
+        ) = GlRenderer(null, width, height, filter, taps, srcWidth, srcHeight, sharpen)
 
         fun forEncoding(input: Surface, width: Int, height: Int) = GlRenderer(input, width, height)
 
@@ -299,6 +339,16 @@ class GlRenderer private constructor(
             }
             return out
         }
+
+        /** A framebuffer texture drawn as it is into another (the sharpen pass). */
+        private val IDENTITY_QUAD = floatArrayOf(
+            -1f, -1f, 0f, 0f,
+            1f, -1f, 1f, 0f,
+            -1f, 1f, 0f, 1f,
+            1f, 1f, 1f, 1f,
+        )
+        // Written out: android.opengl.Matrix isn't available in host unit tests, which load this object.
+        private val IDENTITY = floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f)
 
         /** Texture row 0 (the top of the RGBA frame) at the top of the encoder's surface. */
         private val ENCODE_QUAD = floatArrayOf(
@@ -425,6 +475,27 @@ class GlRenderer private constructor(
                     }
                 }
                 gl_FragColor = vec4(sum / (uTaps * uTaps), 1.0);
+            }
+        """
+
+        // Unsharp mask, as on Apple: each channel moves uAmount times away from its
+        // 5x5 Gaussian blur ([1 4 6 4 1] / 16 per axis; edges clamp to the texture).
+        private const val FRAGMENT_2D_SHARPEN = """
+            precision highp float;
+            varying highp vec2 vUv;
+            uniform sampler2D uTex;
+            uniform vec2 uTexel;
+            uniform float uAmount;
+            float tap(int i) { return i == 0 ? 6.0 : (i == 1 || i == -1) ? 4.0 : 1.0; }
+            void main() {
+                vec3 blur = vec3(0.0);
+                for (int j = -2; j <= 2; j++) {
+                    for (int i = -2; i <= 2; i++) {
+                        blur += tap(i) * tap(j) * texture2D(uTex, vUv + vec2(float(i), float(j)) * uTexel).rgb;
+                    }
+                }
+                vec3 x = texture2D(uTex, vUv).rgb;
+                gl_FragColor = vec4(clamp(x + uAmount * (x - blur / 256.0), 0.0, 1.0), 1.0);
             }
         """
 

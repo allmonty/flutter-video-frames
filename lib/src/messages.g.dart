@@ -399,6 +399,7 @@ class VideoReaderHostApi {
     int? maxDimension,
     ScaleFilter filter,
     bool upscale,
+    double sharpen,
   ) async {
     final pigeonVar_channelName =
         'dev.flutter.pigeon.video_frames.VideoReaderHostApi.openReader$pigeonVar_messageChannelSuffix';
@@ -413,6 +414,7 @@ class VideoReaderHostApi {
       maxDimension,
       filter,
       upscale,
+      sharpen,
     ]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 

@@ -91,9 +91,14 @@ final class FrameReader {
   private let srcWidth: Int
   private let srcHeight: Int
   private let filter: PixelConversion.Filter
+  private let sharpen: Double
 
-  init(path: String, maxDimension: Int?, filter: PixelConversion.Filter = .nearest, upscale: Bool = false) throws {
+  init(
+    path: String, maxDimension: Int?, filter: PixelConversion.Filter = .nearest, upscale: Bool = false,
+    sharpen: Double = 0
+  ) throws {
     self.filter = filter
+    self.sharpen = sharpen
     guard FileManager.default.fileExists(atPath: path) else { throw VideoFramesError.fileNotFound(path) }
     asset = AVURLAsset(url: URL(fileURLWithPath: path))
     guard let track = asset.tracks(withMediaType: .video).first else {
@@ -191,7 +196,7 @@ final class FrameReader {
     guard let base = CVPixelBufferGetBaseAddress(pixels) else {
       throw VideoFramesError.readFailed("frame has no pixel data")
     }
-    return PixelConversion.bgraToRgba(
+    var rgba = PixelConversion.bgraToRgba(
       base.assumingMemoryBound(to: UInt8.self),
       srcWidth: CVPixelBufferGetWidth(pixels),
       srcHeight: CVPixelBufferGetHeight(pixels),
@@ -200,5 +205,7 @@ final class FrameReader {
       dstWidth: width,
       dstHeight: height,
       filter: filter)
+    PixelConversion.sharpen(&rgba, width: width, height: height, amount: sharpen)
+    return rgba
   }
 }
