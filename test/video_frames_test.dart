@@ -19,8 +19,13 @@ class FakeReaderApi extends VideoReaderHostApi {
     String path,
     int? maxDimension,
     ScaleFilter filter,
+    bool upscale,
+    double sharpen,
   ) async {
-    calls.add('open $path $maxDimension ${filter.name}');
+    calls.add(
+      'open $path $maxDimension ${filter.name}${upscale ? ' upscale' : ''}'
+      '${sharpen > 0 ? ' sharpen $sharpen' : ''}',
+    );
     frames[readerId] = [
       for (var i = 0; i < 3; i++)
         VideoFrameMessage(ptsUs: i * 40000, width: 4, height: 2, rgba: Uint8List(32)..[0] = i),
@@ -162,6 +167,24 @@ void main() {
     test('passes the scale filter', () async {
       await VideoReader.open('/v.mp4', maxDimension: 320, filter: ScaleFilter.area);
       expect(calls.single, 'open /v.mp4 320 area');
+    });
+
+    test('passes upscale', () async {
+      await VideoReader.open(
+        '/v.mp4',
+        maxDimension: 1280,
+        filter: ScaleFilter.bilinear,
+        upscale: true,
+      );
+      expect(calls.single, 'open /v.mp4 1280 bilinear upscale');
+    });
+
+    test('passes sharpen, and refuses an amount out of 0 to 2', () async {
+      await VideoReader.open('/v.mp4', maxDimension: 1280, upscale: true, sharpen: 0.8);
+      expect(calls.single, 'open /v.mp4 1280 nearest upscale sharpen 0.8');
+      expect(() => VideoReader.open('/v.mp4', sharpen: 3), throwsRangeError);
+      expect(() => VideoReader.open('/v.mp4', sharpen: -1), throwsRangeError);
+      expect(calls, hasLength(1));
     });
 
     test('nextFrame walks frames in order, then returns null', () async {

@@ -81,6 +81,27 @@ void main() {
     expect((scaled.info.width, scaled.info.height), (32, 64));
     expectUprightQuadrants((await scaled.nextFrame())!);
     await scaled.close();
+
+    // Each enlarging shader, and the sharpen pass after it, keeps the frame upright.
+    for (final (filter, sharpen) in [
+      (ScaleFilter.bilinear, 0.0),
+      (ScaleFilter.bicubic, 0.0),
+      (ScaleFilter.lanczos, 0.8),
+    ]) {
+      final enlarged = await VideoReader.open(
+        path,
+        maxDimension: 256,
+        filter: filter,
+        upscale: true,
+        sharpen: sharpen,
+      );
+      expect((enlarged.info.width, enlarged.info.height), (128, 256));
+      final big = (await enlarged.nextFrame())!;
+      expect((big.width, big.height, big.rgba.length), (128, 256, 128 * 256 * 4));
+      expectUprightQuadrants(big);
+      expectUprightQuadrants(await enlarged.frameAt(const Duration(milliseconds: 200)));
+      await enlarged.close();
+    }
   });
 
   testWidgets('scale filters: nearest, bilinear and area differ as expected', (tester) async {
@@ -132,6 +153,73 @@ void main() {
       }
     }
   });
+
+  testWidgets(
+    'enlarging: bicubic, lanczos and sharpen are crisper than bilinear, and keep flat areas; '
+    'area matches bilinear',
+    (tester) async {
+      // Left half gray 64, right half 192, enlarged 4x: the sharper filters have a
+      // steeper step and overshoot it; all three keep the flat parts flat.
+      const width = 32, height = 16;
+      final frame = Uint8List(width * height * 4);
+      for (var i = 0; i < width * height; i++) {
+        final v = i % width < width ~/ 2 ? 64 : 192;
+        frame.fillRange(i * 4, i * 4 + 3, v);
+        frame[i * 4 + 3] = 255;
+      }
+      final path = '${Directory.systemTemp.path}/video_frames_step.mp4';
+      final writer = await VideoWriter.create(
+        path,
+        width: width,
+        height: height,
+        frameRate: 30,
+        bitRate: 8000000,
+      );
+      for (var i = 0; i < 3; i++) {
+        await writer.addFrame(frame, Duration(microseconds: i * 33333));
+      }
+      await writer.finish();
+
+      final rows = <String, List<int>>{};
+      final frames = <String, VideoFrame>{};
+      for (final (name, filter, sharpen) in [
+        ('bilinear', ScaleFilter.bilinear, 0.0),
+        ('area', ScaleFilter.area, 0.0),
+        ('bicubic', ScaleFilter.bicubic, 0.0),
+        ('lanczos', ScaleFilter.lanczos, 0.0),
+        ('bicubic+sharpen', ScaleFilter.bicubic, 0.8),
+      ]) {
+        final reader = await VideoReader.open(
+          path,
+          maxDimension: width * 4,
+          filter: filter,
+          upscale: true,
+          sharpen: sharpen,
+        );
+        expect((reader.info.width, reader.info.height), (width * 4, height * 4));
+        final f = (await reader.nextFrame())!;
+        final viaSeek = await reader.frameAt(Duration.zero);
+        await reader.close();
+        expect(viaSeek.rgba, f.rgba, reason: '$name: frameAt filters like nextFrame');
+        frames[name] = f;
+        final y = height * 2;
+        rows[name] = [for (var x = 0; x < f.width; x++) f.rgba[(y * f.width + x) * 4 + 1]];
+        expectPixel(f, 8, y, (64, 64, 64), '$name dark side', 20);
+        expectPixel(f, f.width - 8, y, (192, 192, 192), '$name light side', 20);
+      }
+      expect(frames['area']!.rgba, frames['bilinear']!.rgba, reason: 'area enlarges like bilinear');
+      int slope(List<int> v) => [for (var i = 1; i < v.length; i++) v[i] - v[i - 1]].reduce(max);
+      final soft = slope(rows['bilinear']!);
+      for (final name in ['bicubic', 'lanczos']) {
+        expect(slope(rows[name]!), greaterThan(soft), reason: '$name is steeper: ${rows[name]}');
+      }
+      expect(
+        slope(rows['bicubic+sharpen']!),
+        greaterThan(slope(rows['bicubic']!)),
+        reason: 'sharpen steepens bicubic: ${rows['bicubic+sharpen']}',
+      );
+    },
+  );
 
   testWidgets('HD colors match a BT.709 reference after a round trip', (tester) async {
     // The same four colors as colors709.mp4 (made by AVFoundation, tagged

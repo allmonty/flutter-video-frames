@@ -192,7 +192,10 @@ class FlutterError (
   val details: Any? = null
 ) : RuntimeException()
 
-/** How frames are filtered when `maxDimension` scales them down. */
+/**
+ * How frames are filtered when `maxDimension` scales them (down, or up with
+ * `upscale`).
+ */
 enum class ScaleFilter(val raw: Int) {
   /**
    * Pick the source pixel at each output pixel's center: sharp, keeps hard
@@ -206,9 +209,21 @@ enum class ScaleFilter(val raw: Int) {
   BILINEAR(1),
   /**
    * Average every source pixel an output pixel covers: smooth at any
-   * downscale (e.g. 4K to 720p).
+   * downscale (e.g. 4K to 720p). When enlarging, the same as [bilinear].
    */
-  AREA(2);
+  AREA(2),
+  /**
+   * Catmull-Rom cubic over 4x4 source pixels: crisper than bilinear when
+   * enlarging, with a slight overshoot at hard edges. Its kernel isn't
+   * widened when shrinking, so use [area] for large downscales.
+   */
+  BICUBIC(3),
+  /**
+   * Lanczos-3 over 6x6 source pixels: the sharpest enlargement, with a
+   * visible ring at hard edges (cartoon outlines, text). Like [bicubic], for
+   * enlarging and small downscales.
+   */
+  LANCZOS(4);
 
   companion object {
     fun ofRaw(raw: Int): ScaleFilter? {
@@ -464,7 +479,7 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
  * Generated interface from Pigeon that represents a handler of messages from Flutter.
  */
 interface VideoReaderHostApi {
-  fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter): VideoInfoMessage
+  fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter, upscale: Boolean, sharpen: Double): VideoInfoMessage
   /** The next frame in presentation order, or null at the end. */
   fun nextFrame(readerId: Long): VideoFrameMessage?
   /**
@@ -498,8 +513,10 @@ interface VideoReaderHostApi {
             val pathArg = args[1] as String
             val maxDimensionArg = args[2] as Long?
             val filterArg = args[3] as ScaleFilter
+            val upscaleArg = args[4] as Boolean
+            val sharpenArg = args[5] as Double
             val wrapped: List<Any?> = try {
-              listOf(api.openReader(readerIdArg, pathArg, maxDimensionArg, filterArg))
+              listOf(api.openReader(readerIdArg, pathArg, maxDimensionArg, filterArg, upscaleArg, sharpenArg))
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)
             }

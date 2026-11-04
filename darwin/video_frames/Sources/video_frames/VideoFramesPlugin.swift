@@ -77,13 +77,16 @@ public class VideoFramesPlugin: NSObject, FlutterPlugin, VideoReaderHostApi, Vid
     }
   }
 
-  func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter) throws
+  func openReader(
+    readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter, upscale: Bool, sharpen: Double
+  ) throws
     -> VideoInfoMessage
   {
     try bridged("unsupportedFormat") {
       let reader = try FrameReader(
         path: path, maxDimension: maxDimension.map { Int($0) },
-        filter: PixelConversion.Filter(rawValue: filter.rawValue) ?? .nearest)
+        filter: PixelConversion.Filter(rawValue: filter.rawValue) ?? .nearest, upscale: upscale,
+        sharpen: sharpen)
       lock.lock()
       readers[readerId] = reader
       lock.unlock()

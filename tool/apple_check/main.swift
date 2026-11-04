@@ -39,6 +39,62 @@ check(scaled(.nearest) == 0, "nearest samples the center pixel: \(scaled(.neares
 check(scaled(.bilinear) == 128, "bilinear blends the two center pixels: \(scaled(.bilinear))")
 check(scaled(.area) == 64, "area averages the whole block: \(scaled(.area))")
 
+// Enlarging: one row of gray pixels (all 4 channels the same), scaled up `factor` times.
+func enlarged(_ row: [UInt8], _ factor: Int, _ filter: PixelConversion.Filter) -> [Int] {
+  let src = (0..<2).flatMap { _ in row.flatMap { [UInt8](repeating: $0, count: 4) } }
+  var out = [UInt8](repeating: 0, count: row.count * factor * 2 * 4)
+  src.withUnsafeBufferPointer { s in out.withUnsafeMutableBufferPointer { d in
+    PixelConversion.scale(s.baseAddress!, srcWidth: row.count, srcHeight: 2, bytesPerRow: row.count * 4, filter: filter,
+      into: d.baseAddress!, width: row.count * factor, height: 2)
+  } }
+  return (0..<row.count * factor).map { Int(out[$0 * 4]) }
+}
+for filter in [PixelConversion.Filter.bicubic, .lanczos] {
+  check(enlarged([100, 100, 100, 100], 3, filter).allSatisfy { $0 == 100 }, "\(filter): a flat color stays flat")
+  // At 3x, every third output pixel's center is exactly on a source pixel's center.
+  let row: [UInt8] = [10, 200, 40, 90, 250, 0, 120, 60]
+  let big = enlarged(row, 3, filter)
+  check(row.indices.allSatisfy { big[$0 * 3 + 1] == Int(row[$0]) }, "\(filter) keeps the source pixels where they are: \(big)")
+}
+// A step from 64 to 192, 4x: bicubic and lanczos are steeper than bilinear, and overshoot it (lanczos the most).
+let step: [UInt8] = [64, 64, 64, 64, 192, 192, 192, 192]
+func slope(_ f: PixelConversion.Filter) -> Int { let v = enlarged(step, 4, f); return zip(v, v.dropFirst()).map { $1 - $0 }.max()! }
+func low(_ f: PixelConversion.Filter) -> Int { enlarged(step, 4, f).min()! }
+check(slope(.bicubic) > slope(.bilinear) && slope(.lanczos) > slope(.bilinear),
+  "steeper than bilinear (\(slope(.bilinear))): bicubic \(slope(.bicubic)), lanczos \(slope(.lanczos))")
+check(low(.lanczos) <= low(.bicubic) && low(.bicubic) < 64 && low(.bilinear) == 64,
+  "overshoot below 64: lanczos \(low(.lanczos)), bicubic \(low(.bicubic)), bilinear \(low(.bilinear))")
+check(enlarged(step, 4, .area) == enlarged(step, 4, .bilinear), "area enlarges like bilinear: \(enlarged(step, 4, .area))")
+// Sharpen: a flat color stays, an edge gains contrast, 0 changes nothing, alpha is kept.
+func sharpened(_ row: [UInt8], _ amount: Double, alpha: UInt8 = 255) -> [Int] {
+  var data = Data((0..<3).flatMap { _ in row.flatMap { [$0, $0, $0, alpha] } })
+  PixelConversion.sharpen(&data, width: row.count, height: 3, amount: amount)
+  return (0..<row.count).map { Int(data[(row.count + $0) * 4]) } + [Int(data[3])]
+}
+check(sharpened([100, 100, 100, 100, 100], 0.8).dropLast().allSatisfy { $0 == 100 }, "sharpen: a flat color stays flat")
+let soft: [UInt8] = [64, 64, 80, 128, 176, 192, 192]
+let crisp = sharpened(soft, 0.8)
+check(crisp[2] < 80 && crisp[4] > 176 && crisp[3] == 128, "sharpen steepens an edge: \(crisp)")
+check(sharpened(soft, 0).dropLast() == soft.map { Int($0) }, "sharpen 0 changes nothing")
+check(sharpened(soft, 2).last == 255 && sharpened(soft, 2, alpha: 7).last == 7, "sharpen keeps alpha")
+
+// Speed: a 480x854 frame enlarged to 1080x1920.
+let big480 = [UInt8](repeating: 128, count: 480 * 854 * 4)
+for filter in [PixelConversion.Filter.bilinear, .bicubic, .lanczos] {
+  var out = [UInt8](repeating: 0, count: 1080 * 1920 * 4)
+  let start = Date()
+  big480.withUnsafeBufferPointer { s in out.withUnsafeMutableBufferPointer { d in
+    PixelConversion.scale(s.baseAddress!, srcWidth: 480, srcHeight: 854, bytesPerRow: 480 * 4, filter: filter, into: d.baseAddress!, width: 1080, height: 1920)
+  } }
+  let ms = Int(Date().timeIntervalSince(start) * 1000)
+  check(ms < 1000, "\(filter): 480x854 to 1080x1920 in \(ms) ms")
+}
+var frame1080 = Data(repeating: 128, count: 1080 * 1920 * 4)
+let sharpenStart = Date()
+PixelConversion.sharpen(&frame1080, width: 1080, height: 1920, amount: 0.8)
+let sharpenMs = Int(Date().timeIntervalSince(sharpenStart) * 1000)
+check(sharpenMs < 1000, "sharpen a 1080x1920 frame in \(sharpenMs) ms")
+
 // Rotation mapping on a synthetic BGRA buffer: 4x2, left half red, right blue.
 var bgra = [UInt8](repeating: 0, count: 4 * 2 * 4)
 for y in 0..<2 { for x in 0..<4 { let i = (y * 4 + x) * 4; if x < 2 { bgra[i + 2] = 255 } else { bgra[i] = 255 }; bgra[i + 3] = 255 } }
@@ -160,6 +216,10 @@ let scaled = try FrameReader(path: path, maxDimension: 160)
 check(scaled.width == 160 && scaled.height == 120, "scaled \(scaled.width)x\(scaled.height)")
 let sf = try scaled.next()!
 check(sf.rgba.count == 160 * 120 * 4, "scaled frame bytes")
+check(PixelConversion.outputSize(srcWidth: 640, srcHeight: 360, rotation: 90, maxDimension: 1280, upscale: true) == (720, 1280), "upscale size, rotated")
+let enlarged = try FrameReader(path: path, maxDimension: w * 2, filter: .bilinear, upscale: true)
+check(enlarged.width == w * 2 && enlarged.height == h * 2, "upscaled \(enlarged.width)x\(enlarged.height)")
+check(try enlarged.next()!.rgba.count == w * 2 * h * 2 * 4, "upscaled frame bytes")
 
 // frameAt and next() filter the same way.
 let areaReader = try FrameReader(path: path, maxDimension: 160, filter: .area)

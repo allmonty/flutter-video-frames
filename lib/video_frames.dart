@@ -226,15 +226,24 @@ class VideoReader {
   /// With `maxDimension`, frames are scaled down (keeping the
   /// aspect ratio) so neither edge exceeds it, using `filter`: the default
   /// [ScaleFilter.nearest] suits pixel art, [ScaleFilter.bilinear] small
-  /// downscales and [ScaleFilter.area] large ones. Applies to [nextFrame]
-  /// and [frameAt].
+  /// downscales and [ScaleFilter.area] large ones. With `upscale`, smaller
+  /// frames are also enlarged until their longest edge equals it. `sharpen`
+  /// (0 to 2, 0 = off) applies an unsharp mask after scaling: each color
+  /// channel moves away from its 5x5 Gaussian blur by that amount (0.8 makes
+  /// an enlarged frame look crisp without halos). Applies to [nextFrame] and
+  /// [frameAt].
   static Future<VideoReader> open(
     String path, {
     int? maxDimension,
     ScaleFilter filter = ScaleFilter.nearest,
+    bool upscale = false,
+    double sharpen = 0,
   }) async {
+    if (!(sharpen >= 0 && sharpen <= 2)) throw RangeError.range(sharpen, 0, 2, 'sharpen');
     final id = VideoFrames._id();
-    final m = await _guard(VideoFrames.readerApi.openReader(id, path, maxDimension, filter));
+    final m = await _guard(
+      VideoFrames.readerApi.openReader(id, path, maxDimension, filter, upscale, sharpen),
+    );
     return VideoReader._(
       id,
       VideoInfo(

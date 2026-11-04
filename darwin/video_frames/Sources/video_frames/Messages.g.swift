@@ -184,7 +184,8 @@ private func nilOrValue<T>(_ value: Any?) -> T? {
 }
 
 
-/// How frames are filtered when `maxDimension` scales them down.
+/// How frames are filtered when `maxDimension` scales them (down, or up with
+/// `upscale`).
 enum ScaleFilter: Int, CaseIterable {
   /// Pick the source pixel at each output pixel's center: sharp, keeps hard
   /// edges (pixel art), but aliases on photos.
@@ -193,8 +194,16 @@ enum ScaleFilter: Int, CaseIterable {
   /// for downscales up to about 2x; larger ones alias again.
   case bilinear = 1
   /// Average every source pixel an output pixel covers: smooth at any
-  /// downscale (e.g. 4K to 720p).
+  /// downscale (e.g. 4K to 720p). When enlarging, the same as [bilinear].
   case area = 2
+  /// Catmull-Rom cubic over 4x4 source pixels: crisper than bilinear when
+  /// enlarging, with a slight overshoot at hard edges. Its kernel isn't
+  /// widened when shrinking, so use [area] for large downscales.
+  case bicubic = 3
+  /// Lanczos-3 over 6x6 source pixels: the sharpest enlargement, with a
+  /// visible ring at hard edges (cartoon outlines, text). Like [bicubic], for
+  /// enlarging and small downscales.
+  case lanczos = 4
 }
 
 /// The video codec a writer encodes with.
@@ -442,7 +451,7 @@ class MessagesPigeonCodec: FlutterStandardMessageCodec, @unchecked Sendable {
 ///
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
 protocol VideoReaderHostApi {
-  func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter) throws -> VideoInfoMessage
+  func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter, upscale: Bool, sharpen: Double) throws -> VideoInfoMessage
   /// The next frame in presentation order, or null at the end.
   func nextFrame(readerId: Int64) throws -> VideoFrameMessage?
   /// The frame closest to `timeUs`, for scrubbing. Doesn't move the
@@ -475,8 +484,10 @@ class VideoReaderHostApiSetup {
         let pathArg = args[1] as! String
         let maxDimensionArg: Int64? = nilOrValue(args[2])
         let filterArg = args[3] as! ScaleFilter
+        let upscaleArg = args[4] as! Bool
+        let sharpenArg = args[5] as! Double
         do {
-          let result = try api.openReader(readerId: readerIdArg, path: pathArg, maxDimension: maxDimensionArg, filter: filterArg)
+          let result = try api.openReader(readerId: readerIdArg, path: pathArg, maxDimension: maxDimensionArg, filter: filterArg, upscale: upscaleArg, sharpen: sharpenArg)
           reply(wrapResult(result))
         } catch {
           reply(wrapError(error))

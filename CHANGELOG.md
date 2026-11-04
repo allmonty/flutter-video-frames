@@ -1,3 +1,14 @@
+## 1.3.0
+
+- `VideoReader.open(upscale: true)`: frames smaller than `maxDimension` are
+  enlarged until their longest edge equals it (before, `maxDimension` only
+  shrank them).
+- `ScaleFilter.bicubic` (Catmull-Rom) and `ScaleFilter.lanczos` (Lanczos-3):
+  crisper enlarging than bilinear. They are meant for enlarging and small
+  downscales; `area` stays the filter for large downscales.
+- `VideoReader.open(sharpen: 0.8)`: an unsharp mask after scaling (0 to 2,
+  default 0, off).
+
 ## 1.2.0
 
 - `VideoFrames.decodeAudio(path)`: a file's audio as 16-bit PCM (`PcmAudio`),

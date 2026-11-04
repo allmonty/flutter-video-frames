@@ -95,7 +95,8 @@ int _deepHash(Object? value) {
   return value.hashCode;
 }
 
-/// How frames are filtered when `maxDimension` scales them down.
+/// How frames are filtered when `maxDimension` scales them (down, or up with
+/// `upscale`).
 enum ScaleFilter {
   /// Pick the source pixel at each output pixel's center: sharp, keeps hard
   /// edges (pixel art), but aliases on photos.
@@ -106,8 +107,18 @@ enum ScaleFilter {
   bilinear,
 
   /// Average every source pixel an output pixel covers: smooth at any
-  /// downscale (e.g. 4K to 720p).
+  /// downscale (e.g. 4K to 720p). When enlarging, the same as [bilinear].
   area,
+
+  /// Catmull-Rom cubic over 4x4 source pixels: crisper than bilinear when
+  /// enlarging, with a slight overshoot at hard edges. Its kernel isn't
+  /// widened when shrinking, so use [area] for large downscales.
+  bicubic,
+
+  /// Lanczos-3 over 6x6 source pixels: the sharpest enlargement, with a
+  /// visible ring at hard edges (cartoon outlines, text). Like [bicubic], for
+  /// enlarging and small downscales.
+  lanczos,
 }
 
 /// The video codec a writer encodes with.
@@ -387,6 +398,8 @@ class VideoReaderHostApi {
     String path,
     int? maxDimension,
     ScaleFilter filter,
+    bool upscale,
+    double sharpen,
   ) async {
     final pigeonVar_channelName =
         'dev.flutter.pigeon.video_frames.VideoReaderHostApi.openReader$pigeonVar_messageChannelSuffix';
@@ -400,6 +413,8 @@ class VideoReaderHostApi {
       path,
       maxDimension,
       filter,
+      upscale,
+      sharpen,
     ]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
