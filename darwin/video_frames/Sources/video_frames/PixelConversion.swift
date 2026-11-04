@@ -29,15 +29,15 @@ enum PixelConversion {
     return ((degrees % 360) + 360) % 360
   }
 
-  /// Downscaling filters, in the order of the Dart `ScaleFilter` enum (the
+  /// Scaling filters, in the order of the Dart `ScaleFilter` enum (the
   /// plugin maps them by raw value; this file can't see the Pigeon types).
   enum Filter: Int {
-    case nearest, bilinear, area
+    case nearest, bilinear, area, bicubic, lanczos
   }
 
   /// BGRA (`bytesPerRow` may include padding) to a tightly packed RGBA frame
   /// of `dstWidth x dstHeight`, rotated clockwise by `rotation` degrees and
-  /// scaled down with `filter`.
+  /// scaled with `filter`.
   static func bgraToRgba(
     _ src: UnsafePointer<UInt8>,
     srcWidth: Int,
@@ -75,7 +75,7 @@ enum PixelConversion {
     return out
   }
 
-  /// Scale 4-byte pixels (any channel order) down to a tightly packed
+  /// Scale 4-byte pixels (any channel order) to a tightly packed
   /// `width x height` buffer.
   static func scale(
     _ src: UnsafePointer<UInt8>,
@@ -122,6 +122,14 @@ enum PixelConversion {
           o += 4
         }
       }
+    case .bicubic:
+      resample(
+        src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow,
+        into: dst, width: width, height: height, support: 2, kernel: catmullRom)
+    case .lanczos:
+      resample(
+        src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow,
+        into: dst, width: width, height: height, support: 3, kernel: lanczos3)
     case .area:
       // Exact box average of the source pixels each output pixel covers.
       func spans(_ dstLen: Int, _ srcLen: Int) -> [Range<Int>] {
@@ -146,6 +154,102 @@ enum PixelConversion {
           dst[o] = UInt8((sum.0 + n / 2) / n); dst[o + 1] = UInt8((sum.1 + n / 2) / n)
           dst[o + 2] = UInt8((sum.2 + n / 2) / n); dst[o + 3] = UInt8((sum.3 + n / 2) / n)
           o += 4
+        }
+      }
+    }
+  }
+
+  /// Catmull-Rom cubic (a = -0.5): passes through the source pixels, a slight overshoot at edges.
+  static func catmullRom(_ x: Double) -> Double {
+    let x = abs(x)
+    if x < 1 { return (1.5 * x - 2.5) * x * x + 1 }
+    if x < 2 { return ((-0.5 * x + 2.5) * x - 4) * x + 2 }
+    return 0
+  }
+
+  /// Lanczos-3: sinc windowed by sinc(x / 3); the sharpest, it rings at hard edges.
+  static func lanczos3(_ x: Double) -> Double {
+    if abs(x) < 1e-9 { return 1 }
+    if abs(x) >= 3 { return 0 }
+    let px = Double.pi * x
+    return 3 * sin(px) * sin(px / 3) / (px * px)
+  }
+
+  /// Per output pixel, the `2 * support` source indices (clamped to the edge)
+  /// and their weights, normalized to 1, sampling at each output pixel's center.
+  static func kernelTaps(_ dstLen: Int, _ srcLen: Int, support: Int, _ kernel: (Double) -> Double)
+    -> (indices: [Int], weights: [Float])
+  {
+    let n = 2 * support
+    var indices = [Int](repeating: 0, count: dstLen * n)
+    var weights = [Float](repeating: 0, count: dstLen * n)
+    for i in 0..<dstLen {
+      let f = (Double(i) + 0.5) * Double(srcLen) / Double(dstLen) - 0.5
+      let first = Int(f.rounded(.down)) - support + 1
+      let w = (0..<n).map { kernel(f - Double(first + $0)) }
+      let sum = w.reduce(0, +)
+      for k in 0..<n {
+        indices[i * n + k] = min(max(first + k, 0), srcLen - 1)
+        weights[i * n + k] = Float(w[k] / sum)
+      }
+    }
+    return (indices, weights)
+  }
+
+  /// Separable resampling with a fixed-size kernel: rows first, into floats
+  /// (they may overshoot 0...255 until the end), then columns. Made for
+  /// enlarging and small shrinks: the kernel isn't widened when shrinking, so
+  /// large shrinks alias (use `area` for those).
+  private static func resample(
+    _ src: UnsafePointer<UInt8>,
+    srcWidth: Int,
+    srcHeight: Int,
+    bytesPerRow: Int,
+    into dst: UnsafeMutablePointer<UInt8>,
+    width: Int,
+    height: Int,
+    support: Int,
+    kernel: (Double) -> Double
+  ) {
+    let n = 2 * support
+    let (xIndices, xWeights) = kernelTaps(width, srcWidth, support: support, kernel)
+    let (yIndices, yWeights) = kernelTaps(height, srcHeight, support: support, kernel)
+    let stride = width * 4
+    var mid = [Float](repeating: 0, count: stride * srcHeight)
+    var acc = [Float](repeating: 0, count: stride)
+    xIndices.withUnsafeBufferPointer { xi in
+      xWeights.withUnsafeBufferPointer { xw in
+        yIndices.withUnsafeBufferPointer { yi in
+          yWeights.withUnsafeBufferPointer { yw in
+            mid.withUnsafeMutableBufferPointer { m in
+              acc.withUnsafeMutableBufferPointer { a in
+                for y in 0..<srcHeight {
+                  let row = src + y * bytesPerRow
+                  let out = m.baseAddress! + y * stride
+                  for x in 0..<width {
+                    var c0: Float = 0, c1: Float = 0, c2: Float = 0, c3: Float = 0
+                    for k in 0..<n {
+                      let s = xi[x * n + k] * 4
+                      let w = xw[x * n + k]
+                      c0 += Float(row[s]) * w; c1 += Float(row[s + 1]) * w
+                      c2 += Float(row[s + 2]) * w; c3 += Float(row[s + 3]) * w
+                    }
+                    out[x * 4] = c0; out[x * 4 + 1] = c1; out[x * 4 + 2] = c2; out[x * 4 + 3] = c3
+                  }
+                }
+                for y in 0..<height {
+                  for j in 0..<stride { a[j] = 0 }
+                  for k in 0..<n {
+                    let source = m.baseAddress! + yi[y * n + k] * stride
+                    let w = yw[y * n + k]
+                    for j in 0..<stride { a[j] += source[j] * w }
+                  }
+                  let o = dst + y * stride
+                  for j in 0..<stride { o[j] = UInt8(min(max(a[j].rounded(), 0), 255)) }
+                }
+              }
+            }
+          }
         }
       }
     }

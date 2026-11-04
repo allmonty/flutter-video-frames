@@ -211,7 +211,19 @@ enum class ScaleFilter(val raw: Int) {
    * Average every source pixel an output pixel covers: smooth at any
    * downscale (e.g. 4K to 720p).
    */
-  AREA(2);
+  AREA(2),
+  /**
+   * Catmull-Rom cubic over 4x4 source pixels: crisper than bilinear when
+   * enlarging, with a slight overshoot at hard edges. Its kernel isn't
+   * widened when shrinking, so use [area] for large downscales.
+   */
+  BICUBIC(3),
+  /**
+   * Lanczos-3 over 6x6 source pixels: the sharpest enlargement, with a
+   * visible ring at hard edges (cartoon outlines, text). Like [bicubic], for
+   * enlarging and small downscales.
+   */
+  LANCZOS(4);
 
   companion object {
     fun ofRaw(raw: Int): ScaleFilter? {

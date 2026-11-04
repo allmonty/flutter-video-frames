@@ -90,6 +90,8 @@ class GlRenderer private constructor(
             !decoding -> FRAGMENT_2D
             filter == ScaleFilter.AREA -> FRAGMENT_EXTERNAL_AREA
             filter == ScaleFilter.NEAREST -> FRAGMENT_EXTERNAL_NEAREST
+            filter == ScaleFilter.BICUBIC -> FRAGMENT_EXTERNAL_BICUBIC
+            filter == ScaleFilter.LANCZOS -> FRAGMENT_EXTERNAL_LANCZOS
             else -> FRAGMENT_EXTERNAL
         }
         program = buildProgram(VERTEX_SHADER, fragment)
@@ -144,7 +146,7 @@ class GlRenderer private constructor(
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, framebuffer)
         val quad = decodeQuad(rotation)
         if (filter == ScaleFilter.AREA) setAreaUniforms(quad)
-        if (filter == ScaleFilter.NEAREST) {
+        if (filter in TEXEL_FILTERS) {
             GLES20.glUseProgram(program)
             GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "uSrcSize"), srcWidth.toFloat(), srcHeight.toFloat())
         }
@@ -262,6 +264,9 @@ class GlRenderer private constructor(
         /** Frame-available callbacks need a Looper; Pigeon's queue threads have none. */
         private val callbackHandler by lazy { Handler(HandlerThread("video_frames").apply { start() }.looper) }
 
+        /** Filters that read whole source texels, so they need the source size. */
+        private val TEXEL_FILTERS = setOf(ScaleFilter.NEAREST, ScaleFilter.BICUBIC, ScaleFilter.LANCZOS)
+
         /** Area filtering averages up to this many bilinear taps per axis, covering 2 texels each. */
         const val MAX_AREA_TAPS = 8
 
@@ -339,6 +344,66 @@ class GlRenderer private constructor(
                 gl_FragColor = vec4(texture2D(uTex, (uTexMatrix * vec4(center, 0.0, 1.0)).xy).rgb, 1.0);
             }
         """
+
+        /**
+         * A separable kernel of `2 * support` taps per axis, `k(x)` in GLSL,
+         * read at source texel centers (exact even with GL_LINEAR), clamped
+         * to the edge, normalized. Fixed size: for enlarging and small
+         * shrinks (large shrinks alias; use area).
+         */
+        private fun fragmentKernel(support: Int, kernel: String) = """
+            #extension GL_OES_EGL_image_external : require
+            precision highp float;
+            varying highp vec2 vRawUv;
+            uniform samplerExternalOES uTex;
+            uniform mat4 uTexMatrix;
+            uniform vec2 uSrcSize;
+            $kernel
+            void main() {
+                vec2 p = vRawUv * uSrcSize - 0.5;
+                vec2 base = floor(p);
+                vec2 t = p - base;
+                vec2 lo = 0.5 / uSrcSize;
+                vec3 sum = vec3(0.0);
+                float total = 0.0;
+                for (int j = ${1 - support}; j <= $support; j++) {
+                    float wy = k(float(j) - t.y);
+                    for (int i = ${1 - support}; i <= $support; i++) {
+                        float w = k(float(i) - t.x) * wy;
+                        vec2 c = clamp((base + vec2(float(i), float(j)) + 0.5) / uSrcSize, lo, 1.0 - lo);
+                        sum += w * texture2D(uTex, (uTexMatrix * vec4(c, 0.0, 1.0)).xy).rgb;
+                        total += w;
+                    }
+                }
+                gl_FragColor = vec4(clamp(sum / total, 0.0, 1.0), 1.0);
+            }
+        """
+
+        // Catmull-Rom (a = -0.5), as on Apple.
+        private val FRAGMENT_EXTERNAL_BICUBIC = fragmentKernel(
+            2,
+            """
+            float k(float x) {
+                x = abs(x);
+                if (x < 1.0) return (1.5 * x - 2.5) * x * x + 1.0;
+                if (x < 2.0) return ((-0.5 * x + 2.5) * x - 4.0) * x + 2.0;
+                return 0.0;
+            }
+            """,
+        )
+
+        // Lanczos-3, as on Apple.
+        private val FRAGMENT_EXTERNAL_LANCZOS = fragmentKernel(
+            3,
+            """
+            float k(float x) {
+                if (abs(x) < 1e-5) return 1.0;
+                if (abs(x) >= 3.0) return 0.0;
+                float px = 3.14159265 * x;
+                return 3.0 * sin(px) * sin(px / 3.0) / (px * px);
+            }
+            """,
+        )
 
         // shortcut: exact up to a 16x downscale (8 taps x 2 texels); beyond that it skips texels. Add a pre-pass if needed.
         private const val FRAGMENT_EXTERNAL_AREA = """

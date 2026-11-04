@@ -145,6 +145,63 @@ void main() {
     }
   });
 
+  testWidgets('enlarging: bicubic and lanczos are crisper than bilinear, and keep flat areas', (
+    tester,
+  ) async {
+    // Left half gray 64, right half 192, enlarged 4x: the sharper filters have a
+    // steeper step and overshoot it; all three keep the flat parts flat.
+    const width = 32, height = 16;
+    final frame = Uint8List(width * height * 4);
+    for (var i = 0; i < width * height; i++) {
+      final v = i % width < width ~/ 2 ? 64 : 192;
+      frame.fillRange(i * 4, i * 4 + 3, v);
+      frame[i * 4 + 3] = 255;
+    }
+    final path = '${Directory.systemTemp.path}/video_frames_step.mp4';
+    final writer = await VideoWriter.create(
+      path,
+      width: width,
+      height: height,
+      frameRate: 30,
+      bitRate: 8000000,
+    );
+    for (var i = 0; i < 3; i++) {
+      await writer.addFrame(frame, Duration(microseconds: i * 33333));
+    }
+    await writer.finish();
+
+    final rows = <ScaleFilter, List<int>>{};
+    for (final filter in [ScaleFilter.bilinear, ScaleFilter.bicubic, ScaleFilter.lanczos]) {
+      final reader = await VideoReader.open(
+        path,
+        maxDimension: width * 4,
+        filter: filter,
+        upscale: true,
+      );
+      expect((reader.info.width, reader.info.height), (width * 4, height * 4));
+      final f = (await reader.nextFrame())!;
+      final viaSeek = await reader.frameAt(Duration.zero);
+      await reader.close();
+      expect(viaSeek.rgba, f.rgba, reason: '${filter.name}: frameAt filters like nextFrame');
+      final y = height * 2;
+      rows[filter] = [for (var x = 0; x < f.width; x++) f.rgba[(y * f.width + x) * 4 + 1]];
+      expectPixel(f, 8, y, (64, 64, 64), '${filter.name} dark side', 20);
+      expectPixel(f, f.width - 8, y, (192, 192, 192), '${filter.name} light side', 20);
+    }
+    int slope(List<int> v) => [for (var i = 1; i < v.length; i++) v[i] - v[i - 1]].reduce(max);
+    final soft = slope(rows[ScaleFilter.bilinear]!);
+    expect(
+      slope(rows[ScaleFilter.bicubic]!),
+      greaterThan(soft),
+      reason: 'bicubic is steeper: ${rows[ScaleFilter.bicubic]}',
+    );
+    expect(
+      slope(rows[ScaleFilter.lanczos]!),
+      greaterThan(soft),
+      reason: 'lanczos is steeper: ${rows[ScaleFilter.lanczos]}',
+    );
+  });
+
   testWidgets('HD colors match a BT.709 reference after a round trip', (tester) async {
     // The same four colors as colors709.mp4 (made by AVFoundation, tagged
     // BT.709). Comparing against how this device decodes that file isolates

@@ -39,6 +39,43 @@ check(scaled(.nearest) == 0, "nearest samples the center pixel: \(scaled(.neares
 check(scaled(.bilinear) == 128, "bilinear blends the two center pixels: \(scaled(.bilinear))")
 check(scaled(.area) == 64, "area averages the whole block: \(scaled(.area))")
 
+// Enlarging: one row of gray pixels (all 4 channels the same), scaled up `factor` times.
+func enlarged(_ row: [UInt8], _ factor: Int, _ filter: PixelConversion.Filter) -> [Int] {
+  let src = (0..<2).flatMap { _ in row.flatMap { [UInt8](repeating: $0, count: 4) } }
+  var out = [UInt8](repeating: 0, count: row.count * factor * 2 * 4)
+  src.withUnsafeBufferPointer { s in out.withUnsafeMutableBufferPointer { d in
+    PixelConversion.scale(s.baseAddress!, srcWidth: row.count, srcHeight: 2, bytesPerRow: row.count * 4, filter: filter,
+      into: d.baseAddress!, width: row.count * factor, height: 2)
+  } }
+  return (0..<row.count * factor).map { Int(out[$0 * 4]) }
+}
+for filter in [PixelConversion.Filter.bicubic, .lanczos] {
+  check(enlarged([100, 100, 100, 100], 3, filter).allSatisfy { $0 == 100 }, "\(filter): a flat color stays flat")
+  // At 3x, every third output pixel's center is exactly on a source pixel's center.
+  let row: [UInt8] = [10, 200, 40, 90, 250, 0, 120, 60]
+  let big = enlarged(row, 3, filter)
+  check(row.indices.allSatisfy { big[$0 * 3 + 1] == Int(row[$0]) }, "\(filter) keeps the source pixels where they are: \(big)")
+}
+// A step from 64 to 192, 4x: bicubic and lanczos are steeper than bilinear, and overshoot it (lanczos the most).
+let step: [UInt8] = [64, 64, 64, 64, 192, 192, 192, 192]
+func slope(_ f: PixelConversion.Filter) -> Int { let v = enlarged(step, 4, f); return zip(v, v.dropFirst()).map { $1 - $0 }.max()! }
+func low(_ f: PixelConversion.Filter) -> Int { enlarged(step, 4, f).min()! }
+check(slope(.bicubic) > slope(.bilinear) && slope(.lanczos) > slope(.bilinear),
+  "steeper than bilinear (\(slope(.bilinear))): bicubic \(slope(.bicubic)), lanczos \(slope(.lanczos))")
+check(low(.lanczos) <= low(.bicubic) && low(.bicubic) < 64 && low(.bilinear) == 64,
+  "overshoot below 64: lanczos \(low(.lanczos)), bicubic \(low(.bicubic)), bilinear \(low(.bilinear))")
+// Speed: a 480x854 frame enlarged to 1080x1920.
+let big480 = [UInt8](repeating: 128, count: 480 * 854 * 4)
+for filter in [PixelConversion.Filter.bilinear, .bicubic, .lanczos] {
+  var out = [UInt8](repeating: 0, count: 1080 * 1920 * 4)
+  let start = Date()
+  big480.withUnsafeBufferPointer { s in out.withUnsafeMutableBufferPointer { d in
+    PixelConversion.scale(s.baseAddress!, srcWidth: 480, srcHeight: 854, bytesPerRow: 480 * 4, filter: filter, into: d.baseAddress!, width: 1080, height: 1920)
+  } }
+  let ms = Int(Date().timeIntervalSince(start) * 1000)
+  check(ms < 1000, "\(filter): 480x854 to 1080x1920 in \(ms) ms")
+}
+
 // Rotation mapping on a synthetic BGRA buffer: 4x2, left half red, right blue.
 var bgra = [UInt8](repeating: 0, count: 4 * 2 * 4)
 for y in 0..<2 { for x in 0..<4 { let i = (y * 4 + x) * 4; if x < 2 { bgra[i + 2] = 255 } else { bgra[i] = 255 }; bgra[i + 3] = 255 } }

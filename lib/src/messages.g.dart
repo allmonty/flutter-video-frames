@@ -109,6 +109,16 @@ enum ScaleFilter {
   /// Average every source pixel an output pixel covers: smooth at any
   /// downscale (e.g. 4K to 720p).
   area,
+
+  /// Catmull-Rom cubic over 4x4 source pixels: crisper than bilinear when
+  /// enlarging, with a slight overshoot at hard edges. Its kernel isn't
+  /// widened when shrinking, so use [area] for large downscales.
+  bicubic,
+
+  /// Lanczos-3 over 6x6 source pixels: the sharpest enlargement, with a
+  /// visible ring at hard edges (cartoon outlines, text). Like [bicubic], for
+  /// enlarging and small downscales.
+  lanczos,
 }
 
 /// The video codec a writer encodes with.
