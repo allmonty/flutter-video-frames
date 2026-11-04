@@ -11,6 +11,11 @@ class FrameSizeTest {
         assertEquals(Pair(640, 360), FrameSize.outputSize(1920, 1080, 0, 640))
         assertEquals(Pair(360, 640), FrameSize.outputSize(1920, 1080, 270, 640))
         assertEquals(Pair(100, 50), FrameSize.outputSize(100, 50, 0, 640))
+        // upscale: a smaller frame grows until its longest edge is maxDimension
+        assertEquals(Pair(640, 320), FrameSize.outputSize(100, 50, 0, 640, upscale = true))
+        assertEquals(Pair(720, 1280), FrameSize.outputSize(640, 360, 90, 1280, upscale = true))
+        assertEquals(Pair(640, 360), FrameSize.outputSize(1920, 1080, 0, 640, upscale = true))
+        assertEquals(Pair(100, 50), FrameSize.outputSize(100, 50, 0, null, upscale = true))
     }
 
     /** The texture coordinate (u, v up) drawn at each output corner, for one rotation. */

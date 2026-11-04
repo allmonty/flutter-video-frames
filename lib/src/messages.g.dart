@@ -95,7 +95,8 @@ int _deepHash(Object? value) {
   return value.hashCode;
 }
 
-/// How frames are filtered when `maxDimension` scales them down.
+/// How frames are filtered when `maxDimension` scales them (down, or up with
+/// `upscale`).
 enum ScaleFilter {
   /// Pick the source pixel at each output pixel's center: sharp, keeps hard
   /// edges (pixel art), but aliases on photos.
@@ -387,6 +388,7 @@ class VideoReaderHostApi {
     String path,
     int? maxDimension,
     ScaleFilter filter,
+    bool upscale,
   ) async {
     final pigeonVar_channelName =
         'dev.flutter.pigeon.video_frames.VideoReaderHostApi.openReader$pigeonVar_messageChannelSuffix';
@@ -400,6 +402,7 @@ class VideoReaderHostApi {
       path,
       maxDimension,
       filter,
+      upscale,
     ]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 

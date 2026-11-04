@@ -92,7 +92,7 @@ final class FrameReader {
   private let srcHeight: Int
   private let filter: PixelConversion.Filter
 
-  init(path: String, maxDimension: Int?, filter: PixelConversion.Filter = .nearest) throws {
+  init(path: String, maxDimension: Int?, filter: PixelConversion.Filter = .nearest, upscale: Bool = false) throws {
     self.filter = filter
     guard FileManager.default.fileExists(atPath: path) else { throw VideoFramesError.fileNotFound(path) }
     asset = AVURLAsset(url: URL(fileURLWithPath: path))
@@ -105,7 +105,7 @@ final class FrameReader {
     let t = track.preferredTransform
     rotation = PixelConversion.rotationDegrees(a: Double(t.a), b: Double(t.b))
     (width, height) = PixelConversion.outputSize(
-      srcWidth: srcWidth, srcHeight: srcHeight, rotation: rotation, maxDimension: maxDimension)
+      srcWidth: srcWidth, srcHeight: srcHeight, rotation: rotation, maxDimension: maxDimension, upscale: upscale)
     durationUs = Int64(CMTimeGetSeconds(asset.duration) * 1_000_000)
     frameRate = track.nominalFrameRate > 0 ? Double(track.nominalFrameRate) : 30
     let audioTrack = asset.tracks(withMediaType: .audio).first

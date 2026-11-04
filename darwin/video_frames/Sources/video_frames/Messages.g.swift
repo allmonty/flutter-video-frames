@@ -184,7 +184,8 @@ private func nilOrValue<T>(_ value: Any?) -> T? {
 }
 
 
-/// How frames are filtered when `maxDimension` scales them down.
+/// How frames are filtered when `maxDimension` scales them (down, or up with
+/// `upscale`).
 enum ScaleFilter: Int, CaseIterable {
   /// Pick the source pixel at each output pixel's center: sharp, keeps hard
   /// edges (pixel art), but aliases on photos.
@@ -442,7 +443,7 @@ class MessagesPigeonCodec: FlutterStandardMessageCodec, @unchecked Sendable {
 ///
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
 protocol VideoReaderHostApi {
-  func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter) throws -> VideoInfoMessage
+  func openReader(readerId: Int64, path: String, maxDimension: Int64?, filter: ScaleFilter, upscale: Bool) throws -> VideoInfoMessage
   /// The next frame in presentation order, or null at the end.
   func nextFrame(readerId: Int64) throws -> VideoFrameMessage?
   /// The frame closest to `timeUs`, for scrubbing. Doesn't move the
@@ -475,8 +476,9 @@ class VideoReaderHostApiSetup {
         let pathArg = args[1] as! String
         let maxDimensionArg: Int64? = nilOrValue(args[2])
         let filterArg = args[3] as! ScaleFilter
+        let upscaleArg = args[4] as! Bool
         do {
-          let result = try api.openReader(readerId: readerIdArg, path: pathArg, maxDimension: maxDimensionArg, filter: filterArg)
+          let result = try api.openReader(readerId: readerIdArg, path: pathArg, maxDimension: maxDimensionArg, filter: filterArg, upscale: upscaleArg)
           reply(wrapResult(result))
         } catch {
           reply(wrapError(error))

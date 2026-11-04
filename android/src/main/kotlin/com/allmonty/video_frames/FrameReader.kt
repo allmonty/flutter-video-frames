@@ -17,7 +17,12 @@ import java.nio.ByteBuffer
  * for seeking ([frameAt]), so scrubbing alone holds a single hardware
  * decoder.
  */
-class FrameReader(private val path: String, private val maxDimension: Int?, private val filter: ScaleFilter) {
+class FrameReader(
+    private val path: String,
+    private val maxDimension: Int?,
+    private val filter: ScaleFilter,
+    private val upscale: Boolean = false,
+) {
     private var sequential: Decoder? = null
     private var seeker: Decoder? = null
 
@@ -64,7 +69,7 @@ class FrameReader(private val path: String, private val maxDimension: Int?, priv
         } finally {
             extractor.release()
         }
-        val (w, h) = FrameSize.outputSize(srcWidth, srcHeight, rotation, maxDimension)
+        val (w, h) = FrameSize.outputSize(srcWidth, srcHeight, rotation, maxDimension, upscale)
         width = w
         height = h
     }

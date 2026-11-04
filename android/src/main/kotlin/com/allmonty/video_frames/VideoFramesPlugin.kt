@@ -32,10 +32,10 @@ class VideoFramesPlugin : FlutterPlugin, VideoReaderHostApi, VideoWriterHostApi,
     private fun reader(id: Long) = synchronized(this) { readers[id] } ?: throw IllegalArgumentException("unknown reader $id")
     private fun writer(id: Long) = synchronized(this) { writers[id] } ?: throw IllegalArgumentException("unknown writer $id")
 
-    override fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter): VideoInfoMessage {
+    override fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter, upscale: Boolean): VideoInfoMessage {
         if (!File(path).isFile) throw FlutterError("fileNotFound", "no file at $path")
         // Opening only reads the container (decoders start on the first frame), so failures here are the file's.
-        val reader = coded("unsupportedFormat") { FrameReader(path, maxDimension?.toInt(), filter) }
+        val reader = coded("unsupportedFormat") { FrameReader(path, maxDimension?.toInt(), filter, upscale) }
         synchronized(this) { readers[readerId] = reader }
         return VideoInfoMessage(
             width = reader.width.toLong(),

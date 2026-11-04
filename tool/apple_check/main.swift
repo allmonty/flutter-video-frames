@@ -160,6 +160,10 @@ let scaled = try FrameReader(path: path, maxDimension: 160)
 check(scaled.width == 160 && scaled.height == 120, "scaled \(scaled.width)x\(scaled.height)")
 let sf = try scaled.next()!
 check(sf.rgba.count == 160 * 120 * 4, "scaled frame bytes")
+check(PixelConversion.outputSize(srcWidth: 640, srcHeight: 360, rotation: 90, maxDimension: 1280, upscale: true) == (720, 1280), "upscale size, rotated")
+let enlarged = try FrameReader(path: path, maxDimension: w * 2, filter: .bilinear, upscale: true)
+check(enlarged.width == w * 2 && enlarged.height == h * 2, "upscaled \(enlarged.width)x\(enlarged.height)")
+check(try enlarged.next()!.rgba.count == w * 2 * h * 2 * 4, "upscaled frame bytes")
 
 // frameAt and next() filter the same way.
 let areaReader = try FrameReader(path: path, maxDimension: 160, filter: .area)

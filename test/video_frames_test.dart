@@ -19,8 +19,9 @@ class FakeReaderApi extends VideoReaderHostApi {
     String path,
     int? maxDimension,
     ScaleFilter filter,
+    bool upscale,
   ) async {
-    calls.add('open $path $maxDimension ${filter.name}');
+    calls.add('open $path $maxDimension ${filter.name}${upscale ? ' upscale' : ''}');
     frames[readerId] = [
       for (var i = 0; i < 3; i++)
         VideoFrameMessage(ptsUs: i * 40000, width: 4, height: 2, rgba: Uint8List(32)..[0] = i),
@@ -162,6 +163,16 @@ void main() {
     test('passes the scale filter', () async {
       await VideoReader.open('/v.mp4', maxDimension: 320, filter: ScaleFilter.area);
       expect(calls.single, 'open /v.mp4 320 area');
+    });
+
+    test('passes upscale', () async {
+      await VideoReader.open(
+        '/v.mp4',
+        maxDimension: 1280,
+        filter: ScaleFilter.bilinear,
+        upscale: true,
+      );
+      expect(calls.single, 'open /v.mp4 1280 bilinear upscale');
     });
 
     test('nextFrame walks frames in order, then returns null', () async {

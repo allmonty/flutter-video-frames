@@ -192,7 +192,10 @@ class FlutterError (
   val details: Any? = null
 ) : RuntimeException()
 
-/** How frames are filtered when `maxDimension` scales them down. */
+/**
+ * How frames are filtered when `maxDimension` scales them (down, or up with
+ * `upscale`).
+ */
 enum class ScaleFilter(val raw: Int) {
   /**
    * Pick the source pixel at each output pixel's center: sharp, keeps hard
@@ -464,7 +467,7 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
  * Generated interface from Pigeon that represents a handler of messages from Flutter.
  */
 interface VideoReaderHostApi {
-  fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter): VideoInfoMessage
+  fun openReader(readerId: Long, path: String, maxDimension: Long?, filter: ScaleFilter, upscale: Boolean): VideoInfoMessage
   /** The next frame in presentation order, or null at the end. */
   fun nextFrame(readerId: Long): VideoFrameMessage?
   /**
@@ -498,8 +501,9 @@ interface VideoReaderHostApi {
             val pathArg = args[1] as String
             val maxDimensionArg = args[2] as Long?
             val filterArg = args[3] as ScaleFilter
+            val upscaleArg = args[4] as Boolean
             val wrapped: List<Any?> = try {
-              listOf(api.openReader(readerIdArg, pathArg, maxDimensionArg, filterArg))
+              listOf(api.openReader(readerIdArg, pathArg, maxDimensionArg, filterArg, upscaleArg))
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)
             }

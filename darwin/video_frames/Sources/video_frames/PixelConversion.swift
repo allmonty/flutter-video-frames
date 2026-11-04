@@ -8,12 +8,12 @@ enum PixelConversion {
   /// Size of a `srcWidth x srcHeight` frame after rotating by `rotation`
   /// degrees (0/90/180/270) and scaling down so neither edge exceeds
   /// `maxDimension` (when given).
-  static func outputSize(srcWidth: Int, srcHeight: Int, rotation: Int, maxDimension: Int?) -> (Int, Int) {
+  static func outputSize(srcWidth: Int, srcHeight: Int, rotation: Int, maxDimension: Int?, upscale: Bool = false) -> (Int, Int) {
     var w = rotation % 180 == 0 ? srcWidth : srcHeight
     var h = rotation % 180 == 0 ? srcHeight : srcWidth
     if let maxDimension = maxDimension, maxDimension > 0 {
       let longest = max(w, h)
-      if longest > maxDimension {
+      if longest > maxDimension || (upscale && longest < maxDimension) {
         let scale = Double(maxDimension) / Double(longest)
         w = max(1, Int((Double(w) * scale).rounded()))
         h = max(1, Int((Double(h) * scale).rounded()))

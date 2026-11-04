@@ -81,6 +81,18 @@ void main() {
     expect((scaled.info.width, scaled.info.height), (32, 64));
     expectUprightQuadrants((await scaled.nextFrame())!);
     await scaled.close();
+
+    final enlarged = await VideoReader.open(
+      path,
+      maxDimension: 256,
+      filter: ScaleFilter.bilinear,
+      upscale: true,
+    );
+    expect((enlarged.info.width, enlarged.info.height), (128, 256));
+    final big = (await enlarged.nextFrame())!;
+    expect((big.width, big.height, big.rgba.length), (128, 256, 128 * 256 * 4));
+    expectUprightQuadrants(big);
+    await enlarged.close();
   });
 
   testWidgets('scale filters: nearest, bilinear and area differ as expected', (tester) async {

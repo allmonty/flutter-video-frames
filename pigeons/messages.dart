@@ -11,7 +11,8 @@ import 'package:pigeon/pigeon.dart';
     dartPackageName: 'video_frames',
   ),
 )
-/// How frames are filtered when `maxDimension` scales them down.
+/// How frames are filtered when `maxDimension` scales them (down, or up with
+/// `upscale`).
 enum ScaleFilter {
   /// Pick the source pixel at each output pixel's center: sharp, keeps hard
   /// edges (pixel art), but aliases on photos.
@@ -97,7 +98,13 @@ class PcmAudioMessage {
 @HostApi()
 abstract class VideoReaderHostApi {
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
-  VideoInfoMessage openReader(int readerId, String path, int? maxDimension, ScaleFilter filter);
+  VideoInfoMessage openReader(
+    int readerId,
+    String path,
+    int? maxDimension,
+    ScaleFilter filter,
+    bool upscale,
+  );
 
   /// The next frame in presentation order, or null at the end.
   @TaskQueue(type: TaskQueueType.serialBackgroundThread)
