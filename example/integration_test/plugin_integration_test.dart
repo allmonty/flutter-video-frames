@@ -82,17 +82,26 @@ void main() {
     expectUprightQuadrants((await scaled.nextFrame())!);
     await scaled.close();
 
-    final enlarged = await VideoReader.open(
-      path,
-      maxDimension: 256,
-      filter: ScaleFilter.bilinear,
-      upscale: true,
-    );
-    expect((enlarged.info.width, enlarged.info.height), (128, 256));
-    final big = (await enlarged.nextFrame())!;
-    expect((big.width, big.height, big.rgba.length), (128, 256, 128 * 256 * 4));
-    expectUprightQuadrants(big);
-    await enlarged.close();
+    // Each enlarging shader, and the sharpen pass after it, keeps the frame upright.
+    for (final (filter, sharpen) in [
+      (ScaleFilter.bilinear, 0.0),
+      (ScaleFilter.bicubic, 0.0),
+      (ScaleFilter.lanczos, 0.8),
+    ]) {
+      final enlarged = await VideoReader.open(
+        path,
+        maxDimension: 256,
+        filter: filter,
+        upscale: true,
+        sharpen: sharpen,
+      );
+      expect((enlarged.info.width, enlarged.info.height), (128, 256));
+      final big = (await enlarged.nextFrame())!;
+      expect((big.width, big.height, big.rgba.length), (128, 256, 128 * 256 * 4));
+      expectUprightQuadrants(big);
+      expectUprightQuadrants(await enlarged.frameAt(const Duration(milliseconds: 200)));
+      await enlarged.close();
+    }
   });
 
   testWidgets('scale filters: nearest, bilinear and area differ as expected', (tester) async {
