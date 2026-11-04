@@ -76,7 +76,7 @@ let soft: [UInt8] = [64, 64, 80, 128, 176, 192, 192]
 let crisp = sharpened(soft, 0.8)
 check(crisp[2] < 80 && crisp[4] > 176 && crisp[3] == 128, "sharpen steepens an edge: \(crisp)")
 check(sharpened(soft, 0).dropLast() == soft.map { Int($0) }, "sharpen 0 changes nothing")
-check(sharpened(soft, 0.8, alpha: 7).last == 7, "sharpen keeps alpha")
+check(sharpened(soft, 2).last == 255 && sharpened(soft, 2, alpha: 7).last == 7, "sharpen keeps alpha")
 
 // Speed: a 480x854 frame enlarged to 1080x1920.
 let big480 = [UInt8](repeating: 128, count: 480 * 854 * 4)

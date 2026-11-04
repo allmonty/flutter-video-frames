@@ -262,42 +262,29 @@ enum PixelConversion {
   /// axis, edges clamped). Alpha is left as it is.
   static func sharpen(_ rgba: inout Data, width: Int, height: Int, amount: Double) {
     guard amount > 0, width > 0, height > 0 else { return }
-    let taps: [Float] = [1, 4, 6, 4, 1]
-    let stride = width * 4
-    var rows = [Float](repeating: 0, count: stride * height)
-    var blur = [Float](repeating: 0, count: stride * height)
-    let a = Float(amount)
-    rgba.withUnsafeMutableBytes { raw in
-      let px = raw.bindMemory(to: UInt8.self)
-      rows.withUnsafeMutableBufferPointer { r in
-        blur.withUnsafeMutableBufferPointer { b in
-          // Rows, then columns: 5 + 5 taps instead of 25.
-          for y in 0..<height {
-            let line = y * stride
-            for x in 0..<width {
-              for c in 0..<3 {
-                var sum: Float = 0
-                for k in 0..<5 { sum += taps[k] * Float(px[line + min(max(x + k - 2, 0), width - 1) * 4 + c]) }
-                r[line + x * 4 + c] = sum
-              }
-            }
-          }
-          for y in 0..<height {
-            let line = y * stride
-            for k in 0..<5 {
-              let source = min(max(y + k - 2, 0), height - 1) * stride
-              let w = taps[k]
-              for j in 0..<stride { b[line + j] += w * r[source + j] }
-            }
-          }
-          for i in 0..<(width * height) {
-            for c in 0..<3 {
-              let o = i * 4 + c
-              let v = Float(px[o])
-              px[o] = UInt8(min(max((v + a * (v - b[o] / 256)).rounded(), 0), 255))
-            }
-          }
-        }
+    // One 5x5 kernel: (1 + amount) x the pixel minus amount x its blur, in 1/8192ths. Integer:
+    // the float convolve needs iOS 17 / macOS 14. It sums to exactly 8192, so flat colors and
+    // alpha (also convolved: vImage's alpha flag would skip red here) stay as they are.
+    let g: [Int] = [1, 4, 6, 4, 1]
+    let divisor = 8192
+    var kernel = (0..<25).map {
+      Int16((-amount * Double(g[$0 / 5] * g[$0 % 5] * divisor) / 256).rounded())
+    }
+    kernel[12] = 0
+    kernel[12] = Int16(divisor - kernel.reduce(0) { $0 + Int($1) })
+    let source = rgba  // vImage can't convolve in place; writing to rgba below copies it
+    source.withUnsafeBytes { s in
+      rgba.withUnsafeMutableBytes { d in
+        var src = vImage_Buffer(
+          data: UnsafeMutableRawPointer(mutating: s.baseAddress!), height: vImagePixelCount(height),
+          width: vImagePixelCount(width), rowBytes: width * 4)
+        var dst = vImage_Buffer(
+          data: d.baseAddress!, height: vImagePixelCount(height), width: vImagePixelCount(width),
+          rowBytes: width * 4)
+        // Bias half the divisor: round to nearest.
+        vImageConvolveWithBias_ARGB8888(
+          &src, &dst, nil, 0, 0, kernel, 5, 5, Int32(divisor), Int32(divisor / 2), nil,
+          vImage_Flags(kvImageEdgeExtend))
       }
     }
   }
