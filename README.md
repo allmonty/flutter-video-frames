@@ -40,7 +40,8 @@ flutter pub add video_frames
 ## Features
 
 - **Read:** decode a video to upright RGBA frames, with rotation metadata
-  applied and optional downscaling. Frames come one by one (from the start
+  applied and optional scaling (down, or up with bicubic or Lanczos and an
+  optional sharpen). Frames come one by one (from the start
   or from any point), or at a given time for scrubbing.
 - **Write:** encode RGBA frames to H.264 or HEVC in an MP4, optionally copying
   another file's audio track through unchanged.
@@ -121,6 +122,30 @@ pixel, best for large downscales like 4K to 720p):
 ```dart
 final reader = await VideoReader.open(path, maxDimension: 720, filter: ScaleFilter.area);
 ```
+
+With `upscale: true`, a frame smaller than `maxDimension` is enlarged until
+its longest edge equals it. For enlarging, `ScaleFilter.bicubic` (Catmull-Rom)
+is crisper than bilinear, and `ScaleFilter.lanczos` (Lanczos-3) is the
+sharpest but rings at hard edges such as cartoon outlines. Both keep their
+kernel size when shrinking, so use `area` for large downscales. `sharpen`
+(0 to 2) then applies an unsharp mask; 0.8 makes an enlarged frame look
+crisp without halos:
+
+```dart
+// A 480p clip shown in a 1280-pixel-tall video.
+final reader = await VideoReader.open(
+  path,
+  maxDimension: 1280,
+  upscale: true,
+  filter: ScaleFilter.bicubic,
+  sharpen: 0.8,
+);
+```
+
+None of these can add detail the video doesn't have: an enlarged 480p frame
+looks crisper with them, not like a real 720p one. Each costs a little time
+per frame (on an M-series Mac, about 15 ms to enlarge 480p to 1080x1920 and
+30 ms more to sharpen it; on Android both run on the GPU).
 
 ## Errors
 
@@ -231,7 +256,7 @@ H.264 then.
 
 | | Android (minSdk 24) | iOS 15+ and macOS 12+ (shared code) |
 |---|---|---|
-| Decode | `MediaExtractor` + `MediaCodec` into a `SurfaceTexture`; OpenGL ES converts, rotates and scales, then reads back RGBA | `AVAssetReader` (BGRA); rotated and converted with Accelerate (vImage) |
+| Decode | `MediaExtractor` + `MediaCodec` into a `SurfaceTexture`; OpenGL ES converts, rotates and scales (a fragment shader per filter, and a second pass to sharpen), then reads back RGBA | `AVAssetReader` (BGRA); rotated and converted with Accelerate (vImage); scaled and sharpened on the CPU (separable kernels) |
 | Seek (`frameAt`) | A second decoder: seek to the previous sync frame, then decode forward | A short-lived `AVAssetReader` from the requested time, so frames convert exactly like sequential ones |
 | Seek (`seek`) | The sequential decoder seeks to the previous sync frame; frames before the target are dropped unrendered | The sequential `AVAssetReader` restarts at the requested time; earlier samples are skipped unconverted |
 | Encode | RGBA drawn with OpenGL ES into a `MediaCodec` H.264/HEVC encoder's input surface (the first encoder that starts, hardware first), explicit timestamps, `MediaMuxer` | `AVAssetWriter` + pixel-buffer adaptor, converted with vImage |
@@ -254,7 +279,8 @@ dart run pigeon --input pigeons/messages.dart
   `./gradlew :video_frames:testDebugUnitTest`. This needs a JDK 17–21,
   such as Android Studio's bundled one.
 - `tool/apple_check.sh`: runs the Swift reader and writer against real
-  AVFoundation on macOS. It checks encoding, decoding, seeking, scaling,
+  AVFoundation on macOS. It checks encoding, decoding, seeking, scaling
+  (each filter, enlarging, sharpening, and their speed),
   rotation, cancelling and audio passthrough, with no device needed.
 - `example/integration_test`: the device tests, on an Android device or
   emulator, an iOS device or simulator, or this Mac:
