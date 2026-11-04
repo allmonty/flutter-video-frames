@@ -107,7 +107,7 @@ enum ScaleFilter {
   bilinear,
 
   /// Average every source pixel an output pixel covers: smooth at any
-  /// downscale (e.g. 4K to 720p).
+  /// downscale (e.g. 4K to 720p). When enlarging, the same as [bilinear].
   area,
 
   /// Catmull-Rom cubic over 4x4 source pixels: crisper than bilinear when

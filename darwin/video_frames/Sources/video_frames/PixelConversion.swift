@@ -87,6 +87,8 @@ enum PixelConversion {
     width: Int,
     height: Int
   ) {
+    // Enlarging, an area average would copy single pixels; blend like Android's area shader does then.
+    let filter = filter == .area && max(width, height) > max(srcWidth, srcHeight) ? .bilinear : filter
     switch filter {
     case .nearest:
       // Sample each output pixel's center, like GL_NEAREST on Android.

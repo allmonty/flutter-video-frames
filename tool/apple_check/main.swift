@@ -64,6 +64,7 @@ check(slope(.bicubic) > slope(.bilinear) && slope(.lanczos) > slope(.bilinear),
   "steeper than bilinear (\(slope(.bilinear))): bicubic \(slope(.bicubic)), lanczos \(slope(.lanczos))")
 check(low(.lanczos) <= low(.bicubic) && low(.bicubic) < 64 && low(.bilinear) == 64,
   "overshoot below 64: lanczos \(low(.lanczos)), bicubic \(low(.bicubic)), bilinear \(low(.bilinear))")
+check(enlarged(step, 4, .area) == enlarged(step, 4, .bilinear), "area enlarges like bilinear: \(enlarged(step, 4, .area))")
 // Sharpen: a flat color stays, an edge gains contrast, 0 changes nothing, alpha is kept.
 func sharpened(_ row: [UInt8], _ amount: Double, alpha: UInt8 = 255) -> [Int] {
   var data = Data((0..<3).flatMap { _ in row.flatMap { [$0, $0, $0, alpha] } })

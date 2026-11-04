@@ -146,7 +146,8 @@ void main() {
   });
 
   testWidgets(
-    'enlarging: bicubic, lanczos and sharpen are crisper than bilinear, and keep flat areas',
+    'enlarging: bicubic, lanczos and sharpen are crisper than bilinear, and keep flat areas; '
+    'area matches bilinear',
     (tester) async {
       // Left half gray 64, right half 192, enlarged 4x: the sharper filters have a
       // steeper step and overshoot it; all three keep the flat parts flat.
@@ -171,8 +172,10 @@ void main() {
       await writer.finish();
 
       final rows = <String, List<int>>{};
+      final frames = <String, VideoFrame>{};
       for (final (name, filter, sharpen) in [
         ('bilinear', ScaleFilter.bilinear, 0.0),
+        ('area', ScaleFilter.area, 0.0),
         ('bicubic', ScaleFilter.bicubic, 0.0),
         ('lanczos', ScaleFilter.lanczos, 0.0),
         ('bicubic+sharpen', ScaleFilter.bicubic, 0.8),
@@ -189,11 +192,13 @@ void main() {
         final viaSeek = await reader.frameAt(Duration.zero);
         await reader.close();
         expect(viaSeek.rgba, f.rgba, reason: '$name: frameAt filters like nextFrame');
+        frames[name] = f;
         final y = height * 2;
         rows[name] = [for (var x = 0; x < f.width; x++) f.rgba[(y * f.width + x) * 4 + 1]];
         expectPixel(f, 8, y, (64, 64, 64), '$name dark side', 20);
         expectPixel(f, f.width - 8, y, (192, 192, 192), '$name light side', 20);
       }
+      expect(frames['area']!.rgba, frames['bilinear']!.rgba, reason: 'area enlarges like bilinear');
       int slope(List<int> v) => [for (var i = 1; i < v.length; i++) v[i] - v[i - 1]].reduce(max);
       final soft = slope(rows['bilinear']!);
       for (final name in ['bicubic', 'lanczos']) {

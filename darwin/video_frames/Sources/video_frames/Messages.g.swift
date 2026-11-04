@@ -194,7 +194,7 @@ enum ScaleFilter: Int, CaseIterable {
   /// for downscales up to about 2x; larger ones alias again.
   case bilinear = 1
   /// Average every source pixel an output pixel covers: smooth at any
-  /// downscale (e.g. 4K to 720p).
+  /// downscale (e.g. 4K to 720p). When enlarging, the same as [bilinear].
   case area = 2
   /// Catmull-Rom cubic over 4x4 source pixels: crisper than bilinear when
   /// enlarging, with a slight overshoot at hard edges. Its kernel isn't
