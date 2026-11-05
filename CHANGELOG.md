@@ -1,3 +1,10 @@
+## 1.3.1
+
+- iOS/macOS: enlarging with `bilinear`, `bicubic` or `lanczos` uses vImage,
+  so it stays fast in Debug builds (it took seconds a frame there; now under
+  30 ms for 480p to 1080x1920), and is faster in Release too. Results match
+  1.3.0's within a few levels.
+
 ## 1.3.0
 
 - `VideoReader.open(upscale: true)`: frames smaller than `maxDimension` are

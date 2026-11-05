@@ -144,8 +144,9 @@ final reader = await VideoReader.open(
 
 None of these can add detail the video doesn't have: an enlarged 480p frame
 looks crisper with them, not like a real 720p one. Each costs a little time
-per frame (on an M-series Mac, about 15 ms to enlarge 480p to 1080x1920 and
-about 1 ms more to sharpen it; on Android both run on the GPU).
+per frame (on an M-series Mac, about 5 ms to enlarge 480p to 1080x1920 and
+about 1 ms more to sharpen it, and under 30 ms in a Debug build; on Android
+both run on the GPU).
 
 ## Errors
 
@@ -256,7 +257,7 @@ H.264 then.
 
 | | Android (minSdk 24) | iOS 15+ and macOS 12+ (shared code) |
 |---|---|---|
-| Decode | `MediaExtractor` + `MediaCodec` into a `SurfaceTexture`; OpenGL ES converts, rotates and scales (a fragment shader per filter, and a second pass to sharpen), then reads back RGBA | `AVAssetReader` (BGRA); rotated and converted with Accelerate (vImage); scaled on the CPU (separable kernels) and sharpened with a vImage convolution |
+| Decode | `MediaExtractor` + `MediaCodec` into a `SurfaceTexture`; OpenGL ES converts, rotates and scales (a fragment shader per filter, and a second pass to sharpen), then reads back RGBA | `AVAssetReader` (BGRA); rotated and converted with Accelerate (vImage); enlarged with vImage shears (our kernels, in floats) and shrunk with separable kernels on the CPU; sharpened with a vImage convolution |
 | Seek (`frameAt`) | A second decoder: seek to the previous sync frame, then decode forward | A short-lived `AVAssetReader` from the requested time, so frames convert exactly like sequential ones |
 | Seek (`seek`) | The sequential decoder seeks to the previous sync frame; frames before the target are dropped unrendered | The sequential `AVAssetReader` restarts at the requested time; earlier samples are skipped unconverted |
 | Encode | RGBA drawn with OpenGL ES into a `MediaCodec` H.264/HEVC encoder's input surface (the first encoder that starts, hardware first), explicit timestamps, `MediaMuxer` | `AVAssetWriter` + pixel-buffer adaptor, converted with vImage |
