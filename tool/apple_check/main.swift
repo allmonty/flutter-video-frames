@@ -78,6 +78,28 @@ check(crisp[2] < 80 && crisp[4] > 176 && crisp[3] == 128, "sharpen steepens an e
 check(sharpened(soft, 0).dropLast() == soft.map { Int($0) }, "sharpen 0 changes nothing")
 check(sharpened(soft, 2).last == 255 && sharpened(soft, 2, alpha: 7).last == 7, "sharpen keeps alpha")
 
+// Enlarging goes through vImage (fast even unoptimized); it must give about the Swift loops' pixels.
+var rng = SystemRandomNumberGenerator()
+let noise = (0..<(37 * 23 * 4)).map { _ in UInt8.random(in: 0...255, using: &rng) }
+for (kernel, support, f) in [(PixelConversion.Kernel.tent, 1, { (x: Double) in max(0, 1 - abs(x)) }),
+                             (.catmullRom, 2, PixelConversion.catmullRom), (.lanczos3, 3, PixelConversion.lanczos3)] {
+  for (w, h) in [(111, 69), (80, 61), (38, 24), (55, 23), (37, 50), (74, 46)] {
+    var viaVImage = [UInt8](repeating: 0, count: w * h * 4), viaLoops = viaVImage
+    noise.withUnsafeBufferPointer { s in
+      viaVImage.withUnsafeMutableBufferPointer { d in
+        PixelConversion.enlarge(s.baseAddress!, srcWidth: 37, srcHeight: 23, bytesPerRow: 37 * 4, into: d.baseAddress!, width: w, height: h, kernel: kernel)
+      }
+      viaLoops.withUnsafeMutableBufferPointer { d in
+        PixelConversion.resample(s.baseAddress!, srcWidth: 37, srcHeight: 23, bytesPerRow: 37 * 4, into: d.baseAddress!, width: w, height: h, support: support, kernel: f)
+      }
+    }
+    let diffs = zip(viaVImage, viaLoops).map { abs(Int($0) - Int($1)) }
+    let worst = diffs.max()!, mean = Double(diffs.reduce(0, +)) / Double(diffs.count)
+    // vImage samples each kernel at a fixed set of sub-pixel phases: on pure noise that is a few levels off at worst.
+    check(worst <= 6 && mean < 1, "\(kernel) 37x23 to \(w)x\(h): vImage matches the loops (worst \(worst), mean \(String(format: "%.2f", mean)))")
+  }
+}
+
 // Speed: a 480x854 frame enlarged to 1080x1920.
 let big480 = [UInt8](repeating: 128, count: 480 * 854 * 4)
 for filter in [PixelConversion.Filter.bilinear, .bicubic, .lanczos] {
