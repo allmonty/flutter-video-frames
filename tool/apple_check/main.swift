@@ -104,22 +104,29 @@ for (kernel, support, f) in [(PixelConversion.Kernel.tent, 1, { (x: Double) in m
   }
 }
 
-// Speed: a 480x854 frame enlarged to 1080x1920.
+// Speed: a 480x854 frame enlarged to 1080x1920, and back. Each takes 3-7 ms on an M-series Mac; 50 ms leaves room
+// for CI's VM and still catches a path that falls off vImage or the optimizer.
 let big480 = [UInt8](repeating: 128, count: 480 * 854 * 4)
-for filter in [PixelConversion.Filter.bilinear, .bicubic, .lanczos] {
-  var out = [UInt8](repeating: 0, count: 1080 * 1920 * 4)
-  let start = Date()
-  big480.withUnsafeBufferPointer { s in out.withUnsafeMutableBufferPointer { d in
-    PixelConversion.scale(s.baseAddress!, srcWidth: 480, srcHeight: 854, bytesPerRow: 480 * 4, filter: filter, into: d.baseAddress!, width: 1080, height: 1920)
-  } }
-  let ms = Int(Date().timeIntervalSince(start) * 1000)
-  check(ms < 1000, "\(filter): 480x854 to 1080x1920 in \(ms) ms")
+let big1080 = [UInt8](repeating: 128, count: 1080 * 1920 * 4)
+for (filter, enlarging) in [(PixelConversion.Filter.nearest, true), (.bilinear, true), (.bicubic, true), (.lanczos, true),
+                            (.bilinear, false), (.bicubic, false), (.area, false)] {
+  let (src, sw, sh, w, h) = enlarging ? (big480, 480, 854, 1080, 1920) : (big1080, 1080, 1920, 480, 854)
+  var out = [UInt8](repeating: 0, count: w * h * 4)
+  // The fastest of 3, so the first call's warm-up (about 20 ms for vImage) doesn't count.
+  let ms = (0..<3).map { _ -> Int in
+    let start = Date()
+    src.withUnsafeBufferPointer { s in out.withUnsafeMutableBufferPointer { d in
+      PixelConversion.scale(s.baseAddress!, srcWidth: sw, srcHeight: sh, bytesPerRow: sw * 4, filter: filter, into: d.baseAddress!, width: w, height: h)
+    } }
+    return Int(Date().timeIntervalSince(start) * 1000)
+  }.min()!
+  check(ms < 50, "\(filter): \(sw)x\(sh) to \(w)x\(h) in \(ms) ms")
 }
 var frame1080 = Data(repeating: 128, count: 1080 * 1920 * 4)
 let sharpenStart = Date()
 PixelConversion.sharpen(&frame1080, width: 1080, height: 1920, amount: 0.8)
 let sharpenMs = Int(Date().timeIntervalSince(sharpenStart) * 1000)
-check(sharpenMs < 1000, "sharpen a 1080x1920 frame in \(sharpenMs) ms")
+check(sharpenMs < 50, "sharpen a 1080x1920 frame in \(sharpenMs) ms")
 
 // Rotation mapping on a synthetic BGRA buffer: 4x2, left half red, right blue.
 var bgra = [UInt8](repeating: 0, count: 4 * 2 * 4)

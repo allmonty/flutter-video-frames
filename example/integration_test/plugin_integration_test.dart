@@ -305,7 +305,7 @@ void main() {
     expectPixel(viaSeek, 480, 270, (r, g, b), 'frameAt matches nextFrame', 12);
   });
 
-  testWidgets('1080p speed (logged, not asserted)', (tester) async {
+  testWidgets('1080p speed (logged; scaling asserted loosely)', (tester) async {
     const width = 1920, height = 1080, frames = 60;
     final path = '${Directory.systemTemp.path}/video_frames_1080p.mp4';
     final input = [for (var i = 0; i < 4; i++) syntheticFrame(width, height, i)];
@@ -412,6 +412,10 @@ void main() {
       'transcode $sequential ms/frame sequential, $pipelined ms/frame pipelined; '
       '${[for (final e in scaling.entries) '${e.key} ${e.value}'].join(', ')} ms/frame',
     );
+    // Loose, as phones vary: it catches a path left unoptimized (seconds a frame), not small slowdowns.
+    for (final MapEntry(:key, :value) in scaling.entries) {
+      expect(value, lessThan(250), reason: '$key: $value ms/frame');
+    }
   });
 
   testWidgets('encode 30 frames, then decode them back', (tester) async {
