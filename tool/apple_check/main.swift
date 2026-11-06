@@ -79,8 +79,12 @@ check(sharpened(soft, 0).dropLast() == soft.map { Int($0) }, "sharpen 0 changes 
 check(sharpened(soft, 2).last == 255 && sharpened(soft, 2, alpha: 7).last == 7, "sharpen keeps alpha")
 
 // Enlarging goes through vImage (fast even unoptimized); it must give about the Swift loops' pixels.
-var rng = SystemRandomNumberGenerator()
-let noise = (0..<(37 * 23 * 4)).map { _ in UInt8.random(in: 0...255, using: &rng) }
+// Fixed noise (an LCG): fresh random noise reached 7 levels in about 1 run in 100 and failed CI.
+var lcg: UInt64 = 1
+let noise = (0..<(37 * 23 * 4)).map { _ -> UInt8 in
+  lcg = lcg &* 6364136223846793005 &+ 1442695040888963407
+  return UInt8(truncatingIfNeeded: lcg >> 33)
+}
 for (kernel, support, f) in [(PixelConversion.Kernel.tent, 1, { (x: Double) in max(0, 1 - abs(x)) }),
                              (.catmullRom, 2, PixelConversion.catmullRom), (.lanczos3, 3, PixelConversion.lanczos3)] {
   for (w, h) in [(111, 69), (80, 61), (38, 24), (55, 23), (37, 50), (74, 46)] {
