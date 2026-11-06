@@ -89,6 +89,13 @@ enum PixelConversion {
   ) {
     // Enlarging, an area average would copy single pixels; blend like Android's area shader does then.
     let filter = filter == .area && max(width, height) > max(srcWidth, srcHeight) ? .bilinear : filter
+    let kernels: [Filter: Kernel] = [.bilinear: .tent, .bicubic: .catmullRom, .lanczos: .lanczos3]
+    if width >= srcWidth && height >= srcHeight, let kernel = kernels[filter] {
+      enlarge(
+        src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow,
+        into: dst, width: width, height: height, kernel: kernel)
+      return
+    }
     switch filter {
     case .nearest:
       // Sample each output pixel's center, like GL_NEAREST on Android.
@@ -101,10 +108,6 @@ enum PixelConversion {
           o += 4
         }
       }
-    case .bilinear where width >= srcWidth && height >= srcHeight:
-      enlarge(
-        src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow,
-        into: dst, width: width, height: height, kernel: .tent)
     case .bilinear:
       // Fixed-point weights out of 256, sampling at each output pixel's center.
       func taps(_ dstLen: Int, _ srcLen: Int) -> [(Int, Int, Int)] {
@@ -128,14 +131,6 @@ enum PixelConversion {
           o += 4
         }
       }
-    case .bicubic where width >= srcWidth && height >= srcHeight:
-      enlarge(
-        src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow,
-        into: dst, width: width, height: height, kernel: .catmullRom)
-    case .lanczos where width >= srcWidth && height >= srcHeight:
-      enlarge(
-        src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow,
-        into: dst, width: width, height: height, kernel: .lanczos3)
     case .bicubic:
       resample(
         src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow,
