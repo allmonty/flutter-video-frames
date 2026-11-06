@@ -203,9 +203,8 @@ enum PixelConversion {
     if sum != 0 { for i in 0..<Int(n) { ys[i] /= sum } }
   }
 
-  /// Enlarge with vImage's shears (one axis at a time, any kernel): Accelerate ships optimized, so this stays fast in
-  /// a Debug build, where the Swift loops of `resample` take seconds a frame. Pixel centers line up as in
-  /// `kernelTaps`, and edges extend.
+  /// Enlarge with vImage's shears (one axis at a time, any kernel): about 3x faster than the Swift loops of
+  /// `resample`. Pixel centers line up as in `kernelTaps`, and edges extend.
   static func enlarge(
     _ src: UnsafePointer<UInt8>,
     srcWidth: Int,

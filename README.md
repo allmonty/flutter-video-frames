@@ -257,7 +257,7 @@ H.264 then.
 
 | | Android (minSdk 24) | iOS 15+ and macOS 12+ (shared code) |
 |---|---|---|
-| Decode | `MediaExtractor` + `MediaCodec` into a `SurfaceTexture`; OpenGL ES converts, rotates and scales (a fragment shader per filter, and a second pass to sharpen), then reads back RGBA | `AVAssetReader` (BGRA); rotated and converted with Accelerate (vImage); enlarged with vImage shears (our kernels, in floats) and shrunk with separable kernels on the CPU; sharpened with a vImage convolution |
+| Decode | `MediaExtractor` + `MediaCodec` into a `SurfaceTexture`; OpenGL ES converts, rotates and scales (a fragment shader per filter, and a second pass to sharpen), then reads back RGBA | `AVAssetReader` (BGRA); rotated and converted with Accelerate (vImage); enlarged with vImage shears (bilinear, bicubic, Lanczos: our kernels, in floats), other scaling in Swift on the CPU (compiled optimized even in Debug builds); sharpened with a vImage convolution |
 | Seek (`frameAt`) | A second decoder: seek to the previous sync frame, then decode forward | A short-lived `AVAssetReader` from the requested time, so frames convert exactly like sequential ones |
 | Seek (`seek`) | The sequential decoder seeks to the previous sync frame; frames before the target are dropped unrendered | The sequential `AVAssetReader` restarts at the requested time; earlier samples are skipped unconverted |
 | Encode | RGBA drawn with OpenGL ES into a `MediaCodec` H.264/HEVC encoder's input surface (the first encoder that starts, hardware first), explicit timestamps, `MediaMuxer` | `AVAssetWriter` + pixel-buffer adaptor, converted with vImage |
@@ -286,7 +286,8 @@ dart run pigeon --input pigeons/messages.dart
 - `example/integration_test`: the device tests, on an Android device or
   emulator, an iOS device or simulator, or this Mac:
   `cd example && flutter test integration_test -d <device>` (`-d macos`
-  runs them natively on macOS).
+  runs them natively on macOS). The 1080p speed test prints encode, decode,
+  transcode and scaling times, and fails if scaling takes over 250 ms a frame.
 - `tool/make_fixtures.swift`: rebuilds the test videos in
   `example/integration_test/assets`:
   `xcrun swift tool/make_fixtures.swift example/integration_test/assets`.

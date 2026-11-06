@@ -78,7 +78,7 @@ check(crisp[2] < 80 && crisp[4] > 176 && crisp[3] == 128, "sharpen steepens an e
 check(sharpened(soft, 0).dropLast() == soft.map { Int($0) }, "sharpen 0 changes nothing")
 check(sharpened(soft, 2).last == 255 && sharpened(soft, 2, alpha: 7).last == 7, "sharpen keeps alpha")
 
-// Enlarging goes through vImage (fast even unoptimized); it must give about the Swift loops' pixels.
+// Enlarging goes through vImage (about 3x faster); it must give about the Swift loops' pixels.
 // Fixed noise (an LCG): fresh random noise reached 7 levels in about 1 run in 100 and failed CI.
 var lcg: UInt64 = 1
 let noise = (0..<(37 * 23 * 4)).map { _ -> UInt8 in
