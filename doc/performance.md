@@ -32,7 +32,7 @@ tool/apple_check.sh | grep ' ms$'
 App Debug build, the default for `flutter test integration_test` (the plugin
 itself is compiled with `-O`). Same machine, date and commit; 3 runs. 1080p
 is 1920x1080. Scaling paths read 10 frames each, decode included. The test
-fails if a scaling path takes over 250 ms a frame.
+fails on iOS/macOS if a scaling path takes over 250 ms a frame.
 
 | Work | Time per frame |
 |---|---|
@@ -54,9 +54,31 @@ four scaling rows took 409, 841, 1319 and 22 ms.
 
 ## Android
 
-Not measured yet. Run the same device test on a phone and add its numbers
-here, with the device model and Android version:
+### Emulator
+
+`Medium_Phone_API_36.1` (Android 16, arm64) on the same M4, measured
+2026-11-06, the "1080p speed" device test, 4 runs. It encodes in software
+(`c2.android.avc.encoder`), decodes with `c2.goldfish.h264.decoder` and
+`c2.android.avc.decoder`, runs an emulated GPU, and slowed down from run to run (encode 81 ms on the
+first run, 227 on the last), so these show the order of magnitude only: use a
+phone for comparisons. The test's 250 ms limit applies on iOS/macOS only.
+
+| Work | Time per frame |
+|---|---|
+| Encode 1080p (H.264) | 81-227 ms |
+| Decode 1080p | 56-129 ms |
+| Transcode 1080p, one call at a time | 105-250 ms |
+| Transcode 1080p, pipelined | 102-229 ms |
+| Decode 1080p and shrink to 480x270, `area` | 19-63 ms |
+| Decode 1080p and shrink to 480x270, `bicubic` | 19-69 ms |
+| Decode 480x270 and enlarge to 1920x1080, `nearest` | 54-151 ms |
+| Decode 480x270 and enlarge to 1920x1080, `bicubic` + sharpen 0.8 | 63-149 ms |
 
 ```sh
-cd example && flutter test integration_test -d <android device> --plain-name "1080p speed"
+cd example && flutter test integration_test -d emulator-5554 --plain-name "1080p speed"
 ```
+
+### Phone
+
+Not measured yet. Run the same test on a phone and add its numbers here,
+with the device model and Android version.
