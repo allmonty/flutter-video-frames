@@ -145,8 +145,8 @@ final reader = await VideoReader.open(
 None of these can add detail the video doesn't have: an enlarged 480p frame
 looks crisper with them, not like a real 720p one. Each costs a little time
 per frame (on an M-series Mac, about 5 ms to enlarge 480p to 1080x1920 and
-about 1 ms more to sharpen it, and under 30 ms in a Debug build; on Android
-both run on the GPU).
+about 1 ms more to sharpen it, the same in a Debug build; on Android both
+run on the GPU).
 
 ## Errors
 

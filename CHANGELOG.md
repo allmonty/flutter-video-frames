@@ -1,9 +1,12 @@
 ## 1.3.1
 
-- iOS/macOS: enlarging with `bilinear`, `bicubic` or `lanczos` uses vImage,
-  so it stays fast in Debug builds (it took seconds a frame there; now under
-  30 ms for 480p to 1080x1920), and is faster in Release too. Results match
-  1.3.0's within a few levels.
+- iOS/macOS: the plugin is compiled optimized in an app's Debug build too
+  (SwiftPM and CocoaPods), so scaling with any filter, shrinking included, is
+  as fast there as in Release. It took up to seconds a frame (enlarging with
+  `nearest` 480x270 to 1080p: 1.3 s, now 6 ms).
+- iOS/macOS: enlarging with `bilinear`, `bicubic` or `lanczos` uses vImage, so
+  it is about 3x faster (3-6 ms for 480p to 1080x1920 on an M-series Mac).
+  Results match 1.3.0's within a few levels.
 
 ## 1.3.0
 

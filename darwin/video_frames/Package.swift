@@ -27,6 +27,8 @@ let package = Package(
                 // PrivacyInfo.xcprivacy and uncomment:
                 // .process("PrivacyInfo.xcprivacy"),
             ],
+            // The pixel loops take seconds a frame unoptimized, so app Debug builds compile this target with -O too.
+            swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))],
             linkerSettings: [
                 .linkedFramework("Accelerate"),
                 .linkedFramework("AVFoundation"),
