@@ -305,7 +305,7 @@ void main() {
     expectPixel(viaSeek, 480, 270, (r, g, b), 'frameAt matches nextFrame', 12);
   });
 
-  testWidgets('1080p speed (logged, not asserted)', (tester) async {
+  testWidgets('1080p speed (logged; scaling asserted loosely)', (tester) async {
     const width = 1920, height = 1080, frames = 60;
     final path = '${Directory.systemTemp.path}/video_frames_1080p.mp4';
     final input = [for (var i = 0; i < 4; i++) syntheticFrame(width, height, i)];
@@ -361,12 +361,64 @@ void main() {
 
     final sequential = await transcode(pipelined: false);
     final pipelined = await transcode(pipelined: true);
+
+    // Decoding with scaling: 1080p shrunk to 480x270, and a 480x270 clip enlarged to 1080p.
+    // 10 frames each, so an unoptimized build (seconds a frame) still finishes.
+    final small = '${Directory.systemTemp.path}/video_frames_270p.mp4';
+    final smallWriter = await VideoWriter.create(small, width: 480, height: 270, frameRate: 30);
+    for (var i = 0; i < 10; i++) {
+      await smallWriter.addFrame(syntheticFrame(480, 270, i), Duration(microseconds: i * 33333));
+    }
+    await smallWriter.finish();
+    Future<int> scaled(
+      String path,
+      int maxDimension,
+      ScaleFilter filter, {
+      bool upscale = false,
+      double sharpen = 0,
+    }) async {
+      final reader = await VideoReader.open(
+        path,
+        maxDimension: maxDimension,
+        filter: filter,
+        upscale: upscale,
+        sharpen: sharpen,
+      );
+      final watch = Stopwatch()..start();
+      var count = 0;
+      while (count < 10 && await reader.nextFrame() != null) {
+        count++;
+      }
+      await reader.close();
+      return watch.elapsedMilliseconds ~/ count;
+    }
+
+    final scaling = {
+      'shrink area': await scaled(path, 480, ScaleFilter.area),
+      'shrink bicubic': await scaled(path, 480, ScaleFilter.bicubic),
+      'enlarge nearest': await scaled(small, 1920, ScaleFilter.nearest, upscale: true),
+      'enlarge bicubic+sharpen': await scaled(
+        small,
+        1920,
+        ScaleFilter.bicubic,
+        upscale: true,
+        sharpen: 0.8,
+      ),
+    };
     // ignore: avoid_print
     print(
       '1080p: encode ${encode.elapsedMilliseconds ~/ frames} ms/frame, '
       'decode ${decode.elapsedMilliseconds ~/ frames} ms/frame, '
-      'transcode $sequential ms/frame sequential, $pipelined ms/frame pipelined',
+      'transcode $sequential ms/frame sequential, $pipelined ms/frame pipelined; '
+      '${[for (final e in scaling.entries) '${e.key} ${e.value}'].join(', ')} ms/frame',
     );
+    // Apple only: it catches the plugin's Swift left unoptimized (seconds a frame), not small slowdowns.
+    // Android scales on the GPU, and an emulator's frames vary too much (up to ~150 ms) for a limit.
+    if (Platform.isIOS || Platform.isMacOS) {
+      for (final MapEntry(:key, :value) in scaling.entries) {
+        expect(value, lessThan(250), reason: '$key: $value ms/frame');
+      }
+    }
   });
 
   testWidgets('encode 30 frames, then decode them back', (tester) async {

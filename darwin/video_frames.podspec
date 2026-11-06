@@ -21,8 +21,9 @@ Frame-by-frame video decoding and encoding with AVFoundation.
   s.frameworks = 'Accelerate', 'AVFoundation', 'CoreMedia', 'CoreVideo'
 
   # Flutter.framework does not contain a i386 slice, which is specific to iOS.
-  s.ios.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
-  s.osx.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
+  # The pixel loops take seconds a frame unoptimized, so app Debug builds compile the plugin with -O too.
+  s.ios.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386', 'SWIFT_OPTIMIZATION_LEVEL' => '-O' }
+  s.osx.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'SWIFT_OPTIMIZATION_LEVEL' => '-O' }
   s.swift_version = '5.0'
 
   # If your plugin requires a privacy manifest, for example if it uses any

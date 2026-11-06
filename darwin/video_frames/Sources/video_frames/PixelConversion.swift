@@ -89,6 +89,13 @@ enum PixelConversion {
   ) {
     // Enlarging, an area average would copy single pixels; blend like Android's area shader does then.
     let filter = filter == .area && max(width, height) > max(srcWidth, srcHeight) ? .bilinear : filter
+    let kernels: [Filter: Kernel] = [.bilinear: .tent, .bicubic: .catmullRom, .lanczos: .lanczos3]
+    if width >= srcWidth && height >= srcHeight, let kernel = kernels[filter] {
+      enlarge(
+        src, srcWidth: srcWidth, srcHeight: srcHeight, bytesPerRow: bytesPerRow,
+        into: dst, width: width, height: height, kernel: kernel)
+      return
+    }
     switch filter {
     case .nearest:
       // Sample each output pixel's center, like GL_NEAREST on Android.
@@ -161,6 +168,108 @@ enum PixelConversion {
     }
   }
 
+  /// The kernels `enlarge` hands to vImage.
+  enum Kernel {
+    case tent, catmullRom, lanczos3
+
+    /// Half-width in source pixels: vImage reads x from -halfWidth to halfWidth.
+    var halfWidth: Float {
+      switch self {
+      case .tent: return 1
+      case .catmullRom: return 2
+      case .lanczos3: return 3
+      }
+    }
+
+    /// vImage samples the kernel itself; each window is normalized to 1, like `kernelTaps`.
+    var function: @convention(c) (UnsafePointer<Float>?, UnsafeMutablePointer<Float>?, UInt, UnsafeMutableRawPointer?) -> Void {
+      switch self {
+      case .tent: return { xs, ys, n, _ in PixelConversion.fill(xs, ys, n) { max(0, 1 - abs($0)) } }
+      case .catmullRom: return { xs, ys, n, _ in PixelConversion.fill(xs, ys, n, PixelConversion.catmullRom) }
+      case .lanczos3: return { xs, ys, n, _ in PixelConversion.fill(xs, ys, n, PixelConversion.lanczos3) }
+      }
+    }
+  }
+
+  fileprivate static func fill(
+    _ xs: UnsafePointer<Float>?, _ ys: UnsafeMutablePointer<Float>?, _ n: UInt, _ k: (Double) -> Double
+  ) {
+    guard let xs = xs, let ys = ys, n > 0 else { return }
+    var sum: Float = 0
+    for i in 0..<Int(n) {
+      ys[i] = Float(k(Double(xs[i])))
+      sum += ys[i]
+    }
+    if sum != 0 { for i in 0..<Int(n) { ys[i] /= sum } }
+  }
+
+  /// Enlarge with vImage's shears (one axis at a time, any kernel): about 3x faster than the Swift loops of
+  /// `resample`. Pixel centers line up as in `kernelTaps`, and edges extend.
+  static func enlarge(
+    _ src: UnsafePointer<UInt8>,
+    srcWidth: Int,
+    srcHeight: Int,
+    bytesPerRow: Int,
+    into dst: UnsafeMutablePointer<UInt8>,
+    width: Int,
+    height: Int,
+    kernel: Kernel
+  ) {
+    let sx = Float(width) / Float(srcWidth), sy = Float(height) / Float(srcHeight)
+    func makeFilter(_ scale: Float) -> ResamplingFilter {
+      let size = vImageGetResamplingFilterSize(scale, kernel.function, kernel.halfWidth, vImage_Flags(kvImageNoFlags))
+      let filter = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 16)
+      vImageNewResamplingFilterForFunctionUsingBuffer(
+        filter, scale, kernel.function, kernel.halfWidth, nil, vImage_Flags(kvImageNoFlags))
+      return filter
+    }
+    let xFilter = makeFilter(sx), yFilter = makeFilter(sy)
+    defer {
+      xFilter.deallocate()
+      yFilter.deallocate()
+    }
+    // In floats from end to end, as `resample` does: the kernels overshoot, and clipping to 0...255 between the two
+    // passes would change the result (by up to ~35 levels on noise, measured). An interleaved 4-channel row is also a
+    // planar row 4 times as wide, which is how the 8-bit <-> float conversions read it. vImage writes every element, so
+    // the buffers aren't zeroed first (that took about a quarter of the time).
+    func floats(_ count: Int) -> [Float] { [Float](unsafeUninitializedCapacity: count) { _, n in n = count } }
+    var input = floats(srcWidth * 4 * srcHeight)
+    var rows = floats(width * 4 * srcHeight)
+    var output = floats(width * 4 * height)
+    var black: [Float] = [0, 0, 0, 0]
+    input.withUnsafeMutableBytes { i in
+      rows.withUnsafeMutableBytes { r in
+        output.withUnsafeMutableBytes { o in
+          var source = vImage_Buffer(
+            data: UnsafeMutableRawPointer(mutating: src), height: vImagePixelCount(srcHeight),
+            width: vImagePixelCount(srcWidth * 4), rowBytes: bytesPerRow)
+          var sourceF = vImage_Buffer(
+            data: i.baseAddress!, height: vImagePixelCount(srcHeight), width: vImagePixelCount(srcWidth),
+            rowBytes: srcWidth * 16)
+          var rowsF = vImage_Buffer(
+            data: r.baseAddress!, height: vImagePixelCount(srcHeight), width: vImagePixelCount(width), rowBytes: width * 16)
+          var outputF = vImage_Buffer(
+            data: o.baseAddress!, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 16)
+          var target = vImage_Buffer(
+            data: dst, height: vImagePixelCount(height), width: vImagePixelCount(width * 4), rowBytes: width * 4)
+          var sourcePlanar = sourceF
+          sourcePlanar.width = vImagePixelCount(srcWidth * 4)
+          vImageConvert_Planar8toPlanarF(&source, &sourcePlanar, 255, 0, vImage_Flags(kvImageNoFlags))
+          // Pixel centers map to centers as in kernelTaps. The horizontal shear does that with no translation; the
+          // vertical one scales about the bottom edge, so it is moved back up by what the enlarging added (measured
+          // against `resample` at scales 1.04 to 4, which apple_check compares it with).
+          vImageHorizontalShear_ARGBFFFF(
+            &sourceF, &rowsF, 0, 0, 0, 0, xFilter, &black, vImage_Flags(kvImageEdgeExtend))
+          vImageVerticalShear_ARGBFFFF(
+            &rowsF, &outputF, 0, 0, -(sy - 1) * Float(height), 0, yFilter, &black, vImage_Flags(kvImageEdgeExtend))
+          var outputPlanar = outputF
+          outputPlanar.width = vImagePixelCount(width * 4)
+          vImageConvert_PlanarFtoPlanar8(&outputPlanar, &target, 255, 0, vImage_Flags(kvImageNoFlags))
+        }
+      }
+    }
+  }
+
   /// Catmull-Rom cubic (a = -0.5): passes through the source pixels, a slight overshoot at edges.
   static func catmullRom(_ x: Double) -> Double {
     let x = abs(x)
@@ -202,7 +311,7 @@ enum PixelConversion {
   /// (they may overshoot 0...255 until the end), then columns. Made for
   /// enlarging and small shrinks: the kernel isn't widened when shrinking, so
   /// large shrinks alias (use `area` for those).
-  private static func resample(
+  static func resample(
     _ src: UnsafePointer<UInt8>,
     srcWidth: Int,
     srcHeight: Int,

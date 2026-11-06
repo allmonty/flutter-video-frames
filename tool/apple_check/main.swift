@@ -78,22 +78,55 @@ check(crisp[2] < 80 && crisp[4] > 176 && crisp[3] == 128, "sharpen steepens an e
 check(sharpened(soft, 0).dropLast() == soft.map { Int($0) }, "sharpen 0 changes nothing")
 check(sharpened(soft, 2).last == 255 && sharpened(soft, 2, alpha: 7).last == 7, "sharpen keeps alpha")
 
-// Speed: a 480x854 frame enlarged to 1080x1920.
+// Enlarging goes through vImage (about 3x faster); it must give about the Swift loops' pixels.
+// Fixed noise (an LCG): fresh random noise reached 7 levels in about 1 run in 100 and failed CI.
+var lcg: UInt64 = 1
+let noise = (0..<(37 * 23 * 4)).map { _ -> UInt8 in
+  lcg = lcg &* 6364136223846793005 &+ 1442695040888963407
+  return UInt8(truncatingIfNeeded: lcg >> 33)
+}
+for (kernel, support, f) in [(PixelConversion.Kernel.tent, 1, { (x: Double) in max(0, 1 - abs(x)) }),
+                             (.catmullRom, 2, PixelConversion.catmullRom), (.lanczos3, 3, PixelConversion.lanczos3)] {
+  for (w, h) in [(111, 69), (80, 61), (38, 24), (55, 23), (37, 50), (74, 46)] {
+    var viaVImage = [UInt8](repeating: 0, count: w * h * 4), viaLoops = viaVImage
+    noise.withUnsafeBufferPointer { s in
+      viaVImage.withUnsafeMutableBufferPointer { d in
+        PixelConversion.enlarge(s.baseAddress!, srcWidth: 37, srcHeight: 23, bytesPerRow: 37 * 4, into: d.baseAddress!, width: w, height: h, kernel: kernel)
+      }
+      viaLoops.withUnsafeMutableBufferPointer { d in
+        PixelConversion.resample(s.baseAddress!, srcWidth: 37, srcHeight: 23, bytesPerRow: 37 * 4, into: d.baseAddress!, width: w, height: h, support: support, kernel: f)
+      }
+    }
+    let diffs = zip(viaVImage, viaLoops).map { abs(Int($0) - Int($1)) }
+    let worst = diffs.max()!, mean = Double(diffs.reduce(0, +)) / Double(diffs.count)
+    // vImage samples each kernel at a fixed set of sub-pixel phases: on pure noise that is a few levels off at worst.
+    check(worst <= 6 && mean < 1, "\(kernel) 37x23 to \(w)x\(h): vImage matches the loops (worst \(worst), mean \(String(format: "%.2f", mean)))")
+  }
+}
+
+// Speed: a 480x854 frame enlarged to 1080x1920, and back. Each takes 3-7 ms on an M-series Mac; 50 ms leaves room
+// for CI's VM and still catches a path that falls off vImage or the optimizer.
 let big480 = [UInt8](repeating: 128, count: 480 * 854 * 4)
-for filter in [PixelConversion.Filter.bilinear, .bicubic, .lanczos] {
-  var out = [UInt8](repeating: 0, count: 1080 * 1920 * 4)
-  let start = Date()
-  big480.withUnsafeBufferPointer { s in out.withUnsafeMutableBufferPointer { d in
-    PixelConversion.scale(s.baseAddress!, srcWidth: 480, srcHeight: 854, bytesPerRow: 480 * 4, filter: filter, into: d.baseAddress!, width: 1080, height: 1920)
-  } }
-  let ms = Int(Date().timeIntervalSince(start) * 1000)
-  check(ms < 1000, "\(filter): 480x854 to 1080x1920 in \(ms) ms")
+let big1080 = [UInt8](repeating: 128, count: 1080 * 1920 * 4)
+for (filter, enlarging) in [(PixelConversion.Filter.nearest, true), (.bilinear, true), (.bicubic, true), (.lanczos, true),
+                            (.bilinear, false), (.bicubic, false), (.area, false)] {
+  let (src, sw, sh, w, h) = enlarging ? (big480, 480, 854, 1080, 1920) : (big1080, 1080, 1920, 480, 854)
+  var out = [UInt8](repeating: 0, count: w * h * 4)
+  // The fastest of 3, so the first call's warm-up (about 20 ms for vImage) doesn't count.
+  let ms = (0..<3).map { _ -> Int in
+    let start = Date()
+    src.withUnsafeBufferPointer { s in out.withUnsafeMutableBufferPointer { d in
+      PixelConversion.scale(s.baseAddress!, srcWidth: sw, srcHeight: sh, bytesPerRow: sw * 4, filter: filter, into: d.baseAddress!, width: w, height: h)
+    } }
+    return Int(Date().timeIntervalSince(start) * 1000)
+  }.min()!
+  check(ms < 50, "\(filter): \(sw)x\(sh) to \(w)x\(h) in \(ms) ms")
 }
 var frame1080 = Data(repeating: 128, count: 1080 * 1920 * 4)
 let sharpenStart = Date()
 PixelConversion.sharpen(&frame1080, width: 1080, height: 1920, amount: 0.8)
 let sharpenMs = Int(Date().timeIntervalSince(sharpenStart) * 1000)
-check(sharpenMs < 1000, "sharpen a 1080x1920 frame in \(sharpenMs) ms")
+check(sharpenMs < 50, "sharpen a 1080x1920 frame in \(sharpenMs) ms")
 
 // Rotation mapping on a synthetic BGRA buffer: 4x2, left half red, right blue.
 var bgra = [UInt8](repeating: 0, count: 4 * 2 * 4)
