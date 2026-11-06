@@ -231,10 +231,12 @@ enum PixelConversion {
     }
     // In floats from end to end, as `resample` does: the kernels overshoot, and clipping to 0...255 between the two
     // passes would change the result (by up to ~35 levels on noise, measured). An interleaved 4-channel row is also a
-    // planar row 4 times as wide, which is how the 8-bit <-> float conversions read it.
-    var input = [Float](repeating: 0, count: srcWidth * 4 * srcHeight)
-    var rows = [Float](repeating: 0, count: width * 4 * srcHeight)
-    var output = [Float](repeating: 0, count: width * 4 * height)
+    // planar row 4 times as wide, which is how the 8-bit <-> float conversions read it. vImage writes every element, so
+    // the buffers aren't zeroed first (that took about a quarter of the time).
+    func floats(_ count: Int) -> [Float] { [Float](unsafeUninitializedCapacity: count) { _, n in n = count } }
+    var input = floats(srcWidth * 4 * srcHeight)
+    var rows = floats(width * 4 * srcHeight)
+    var output = floats(width * 4 * height)
     var black: [Float] = [0, 0, 0, 0]
     input.withUnsafeMutableBytes { i in
       rows.withUnsafeMutableBytes { r in
