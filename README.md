@@ -287,7 +287,8 @@ dart run pigeon --input pigeons/messages.dart
   emulator, an iOS device or simulator, or this Mac:
   `cd example && flutter test integration_test -d <device>` (`-d macos`
   runs them natively on macOS). The 1080p speed test prints encode, decode,
-  transcode and scaling times, and fails if scaling takes over 250 ms a frame.
+  transcode and scaling times, and on iOS/macOS fails if scaling takes over
+  250 ms a frame.
   Reference timings to compare against are in
   [doc/performance.md](https://github.com/allmonty/flutter-video-frames/blob/main/doc/performance.md).
 - `tool/make_fixtures.swift`: rebuilds the test videos in

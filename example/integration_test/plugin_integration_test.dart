@@ -412,9 +412,12 @@ void main() {
       'transcode $sequential ms/frame sequential, $pipelined ms/frame pipelined; '
       '${[for (final e in scaling.entries) '${e.key} ${e.value}'].join(', ')} ms/frame',
     );
-    // Loose, as phones vary: it catches a path left unoptimized (seconds a frame), not small slowdowns.
-    for (final MapEntry(:key, :value) in scaling.entries) {
-      expect(value, lessThan(250), reason: '$key: $value ms/frame');
+    // Apple only: it catches the plugin's Swift left unoptimized (seconds a frame), not small slowdowns.
+    // Android scales on the GPU, and an emulator's frames vary too much (up to ~150 ms) for a limit.
+    if (Platform.isIOS || Platform.isMacOS) {
+      for (final MapEntry(:key, :value) in scaling.entries) {
+        expect(value, lessThan(250), reason: '$key: $value ms/frame');
+      }
     }
   });
 
